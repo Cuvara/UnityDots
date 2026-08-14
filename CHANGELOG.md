@@ -5,6 +5,79 @@ All notable changes to the Cuvara DOTS package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-08-14
+
+### Added
+
+- **`Samples~/NetworkedPrediction`** — the first thing that drives `DotsEntityView` and the
+  prediction driver **against a real server**. Their unit tests assert wiring with hand-built
+  snapshots; nothing until now proved that a server's actual entity types resolve, that its
+  coordinates arrive intact, or that exactly one thing writes `LocalTransform` under real traffic.
+
+  No prefabs, no Addressables, no DI: `PrimitiveViewProvider` pools Unity primitives so the sample
+  drops into an empty scene, and it pools for real so the recycle path is exercised rather than
+  hidden behind Instantiate/Destroy. The catalog is built in code — the same data a project would
+  author as assets, typed.
+
+  Tick rate and map bounds come from `GameConstants`, not from literals in the sample. A literal copy
+  compiles, passes, and then disagrees with the server the moment the shared package moves — the trap
+  `SimConstants` was written to avoid, and a sample is not exempt from it.
+
+  **Input is sampled and sent by the sample, not by the driver.** The tick recorded must be the tick
+  that went to the server; a driver inventing its own input builds a buffer the server never saw.
+
+  The overlay is the deliverable, not decoration. `writer:` reads `predictor` or `adapter` for the
+  local entity, and it must never be ambiguous: both writing is the failure `PredictedTransform`
+  exists to prevent, and neither writing is a frozen avatar. Toggling **Prediction Enabled** flips it,
+  which is the A/B this sample is for.
+
+### Changed — an API gap the sample exposed
+
+`ViewConfig.Configure` and `ViewArchetypeLibrary.Configure` are **public**. Both docstrings already
+said they were "for tests and for code that generates configs" while being `internal`, so no consumer
+could ever be the second kind of caller. Building this sample is what surfaced the contradiction: a
+package whose whole premise is spawning from **server snapshots at runtime** must let a consumer
+assemble a catalog without authored assets, and the fields are `[SerializeField] private`, so there is
+no other route outside the Editor.
+
+Additive — nothing that compiled before stops compiling. It is also the second time a sample has paid
+for itself before running: the first was catching that `Samples~` compiles nowhere at all.
+
+### Samples are now compiled by CI
+
+**`Samples~/` is excluded from Unity import, so a sample compiles nowhere by default.**
+`com.cuvara.netcode`'s DOTS sample is in exactly that state: 185 tests green while
+`DOTSNetworkBridge.cs` is read and never built. A sample nothing compiles is a sample that rots, and
+this one would have rotted the same way.
+
+Every Unity job now copies `Samples~/.` into `Assets/` before running, and asserts per configuration:
+
+| | netcode absent | netcode 0.6.2 | no optional packages |
+|---|---|---|---|
+| `Samples.HybridViews.dll` | present | present | present |
+| `Samples.NetworkedPrediction.dll` | **absent** | **present** | **absent** |
+
+`HybridViews` needs no optional package and must always build. `NetworkedPrediction` is gated on both
+defines, so its absence in two of three rows is itself an assertion — the same falsifiable shape as
+the assembly rows.
+
+### Known, deferred
+
+The `.meta` generator emits guid-only stubs. Unity rewrites them on import with its defaults, which is
+harmless for folders, `.cs` and `.md`, and is what those types want. **It is not harmless in general**:
+a stub meta does not mean "no settings", it means "every default" — netcode's `Google.Protobuf.dll`
+shipped a stub, imported with `validateReferences: 1`, and that refused the plugin, poisoned
+`Cuvara.Netcode.Runtime` and produced `0/0 Passed` under a green check. This package ships no binary
+assets today. If it ever does, the generator must emit a real importer block for that type and
+**fail** on a type it does not know how to write, rather than emitting a stub.
+
+### Not proven
+
+**The sample has not been run.** No Unity Editor was available on this side, and it needs a live
+backend plus interactive input. CI proves it *compiles* in the configuration that matters, which is
+strictly less than proving it works. It also does not measure keypress-to-visible — the number the
+prediction effort is actually aimed at — which needs a capture rig rather than an overlay.
+
 ## [0.14.0] - 2026-08-14
 
 ### Added — a third CI configuration

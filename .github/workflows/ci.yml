@@ -139,6 +139,14 @@ jobs:
             productName: DotsTest
           YAML
 
+      # Samples~ is EXCLUDED from Unity import, so a sample compiles nowhere by default —
+      # netcode's DOTS sample is in that state right now: 185 tests green while
+      # DOTSNetworkBridge.cs is read and never built. Copying the samples into Assets/ is
+      # what gives them a compiler. Their own defineConstraints still decide whether each
+      # one builds, which is why the assertions below differ per configuration.
+      - name: Import samples so they are compiled
+        run: cp -r package/Samples~/. Assets/
+
       - name: Run tests
         uses: game-ci/unity-test-runner@v4
         env:
@@ -155,6 +163,15 @@ jobs:
       # The adapter must be gone, not broken. If this file exists, the
       # versionDefines gate is not doing its job and the package would ship a
       # CS0535 into any project on an older netcode.
+      - name: Samples must compile as their constraints allow
+        if: always()
+        run: |
+          test -f Library/ScriptAssemblies/Cuvara.DOTS.Samples.HybridViews.dll \
+            || { echo "::error::HybridViews sample did not compile; it needs no optional package and must always build"; exit 1; }
+          test ! -f Library/ScriptAssemblies/Cuvara.DOTS.Samples.NetworkedPrediction.dll \
+            || { echo "::error::NetworkedPrediction sample compiled without its optional packages; its defineConstraints are not gating it"; exit 1; }
+          echo "HybridViews built; NetworkedPrediction correctly absent."
+
       - name: Adapter assembly must be absent
         if: always()
         run: |
@@ -260,6 +277,14 @@ jobs:
             productName: DotsTest
           YAML
 
+      # Samples~ is EXCLUDED from Unity import, so a sample compiles nowhere by default —
+      # netcode's DOTS sample is in that state right now: 185 tests green while
+      # DOTSNetworkBridge.cs is read and never built. Copying the samples into Assets/ is
+      # what gives them a compiler. Their own defineConstraints still decide whether each
+      # one builds, which is why the assertions below differ per configuration.
+      - name: Import samples so they are compiled
+        run: cp -r package/Samples~/. Assets/
+
       - name: Run tests
         uses: game-ci/unity-test-runner@v4
         env:
@@ -272,6 +297,15 @@ jobs:
           githubToken: ${{ secrets.GITHUB_TOKEN }}
           checkName: Test Results (netcode 0.6.2)
           artifactsPath: artifacts
+
+      - name: Samples must compile
+        if: always()
+        run: |
+          for DLL in Cuvara.DOTS.Samples.HybridViews Cuvara.DOTS.Samples.NetworkedPrediction; do
+            test -f "Library/ScriptAssemblies/$DLL.dll" \
+              || { echo "::error::$DLL.dll did not compile. A sample nothing compiles is a sample that rots."; exit 1; }
+            echo "$DLL.dll built."
+          done
 
       - name: Adapter assembly must be present
         if: always()
@@ -353,6 +387,14 @@ jobs:
             productName: DotsTest
           YAML
 
+      # Samples~ is EXCLUDED from Unity import, so a sample compiles nowhere by default —
+      # netcode's DOTS sample is in that state right now: 185 tests green while
+      # DOTSNetworkBridge.cs is read and never built. Copying the samples into Assets/ is
+      # what gives them a compiler. Their own defineConstraints still decide whether each
+      # one builds, which is why the assertions below differ per configuration.
+      - name: Import samples so they are compiled
+        run: cp -r package/Samples~/. Assets/
+
       - name: Run tests
         uses: game-ci/unity-test-runner@v4
         env:
@@ -365,6 +407,15 @@ jobs:
           githubToken: ${{ secrets.GITHUB_TOKEN }}
           checkName: Test Results (no optional packages)
           artifactsPath: artifacts
+
+      - name: Samples must compile as their constraints allow
+        if: always()
+        run: |
+          test -f Library/ScriptAssemblies/Cuvara.DOTS.Samples.HybridViews.dll \
+            || { echo "::error::HybridViews sample did not compile; it needs no optional package and must always build"; exit 1; }
+          test ! -f Library/ScriptAssemblies/Cuvara.DOTS.Samples.NetworkedPrediction.dll \
+            || { echo "::error::NetworkedPrediction sample compiled without its optional packages; its defineConstraints are not gating it"; exit 1; }
+          echo "HybridViews built; NetworkedPrediction correctly absent."
 
       - name: Every optional assembly must be absent
         if: always()

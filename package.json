@@ -1,8 +1,8 @@
 {
     "name": "com.cuvara.dots",
-    "version": "0.14.0",
+    "version": "0.15.0",
     "displayName": "Cuvara DOTS",
-    "description": "Shared DOTS/ECS building blocks for Cuvara projects — reusable components, systems, jobs and authoring helpers built on Unity Entities, Burst, Collections and Mathematics.",
+    "description": "Shared DOTS/ECS building blocks for Cuvara projects \u2014 reusable components, systems, jobs and authoring helpers built on Unity Entities, Burst, Collections and Mathematics.",
     "unity": "6000.3",
     "documentationUrl": "",
     "license": "MIT",
@@ -28,6 +28,11 @@
             "displayName": "Hybrid Views",
             "description": "Ready-to-play scene. Entities drive pooled GameObject views: DotsViewBootstrap.Install, a self-contained IViewAssetProvider over Unity primitives, orbiting entities so transform sync is visible, despawn/recycle, and a narrated chunk warm/release showing a shared key surviving one chunk's release. Needs neither VContainer nor GameFoundation nor Addressables.",
             "path": "Samples~/HybridViews"
+        },
+        {
+            "displayName": "Networked Prediction",
+            "description": "Drives the netcode adapter and the prediction driver end to end against a running backend. Replicated entities become ECS entities with pooled primitive views; the local player is client-side predicted. An on-screen overlay shows what the server sent beside where it was drawn, and which of the two writers owns the local transform.",
+            "path": "Samples~/NetworkedPrediction"
         }
     ],
     "testables": [

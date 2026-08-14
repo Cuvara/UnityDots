@@ -37,8 +37,12 @@ namespace Cuvara.DOTS.Configuration
 
         public IReadOnlyList<Entry> Entries => entries;
 
-        /// <summary>Replaces the entry list. Internal, for tests and generated libraries.</summary>
-        internal void Configure(params Entry[] newEntries)
+        /// <summary>Replaces the entry list — for tests and for generated libraries.</summary>
+        /// <remarks>
+        /// Public since 0.15.0, alongside <see cref="ViewConfig.Configure"/> and for the same reason:
+        /// a library assembled in code is useless if the configs in it cannot be.
+        /// </remarks>
+        public void Configure(params Entry[] newEntries)
         {
             entries = new List<Entry>(newEntries);
         }

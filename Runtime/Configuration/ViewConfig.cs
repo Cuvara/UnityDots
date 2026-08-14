@@ -108,12 +108,22 @@ namespace Cuvara.DOTS.Configuration
         /// Sets every authored field in one call.
         /// </summary>
         /// <remarks>
-        /// <c>internal</c> and intended for tests and for code that generates configs. The fields are
+        /// <para>
+        /// Intended for tests and for code that generates configs. The fields are
         /// <c>[SerializeField]</c> private so the inspector owns them, and the alternative in a test
         /// is <c>SerializedObject</c> with string property names — which drags UnityEditor into the
         /// play-mode assembly and silently no-ops if a field is ever renamed.
+        /// </para>
+        /// <para>
+        /// <b>Public since 0.15.0, and the reason is a contradiction this docstring was carrying.</b>
+        /// It has always said "intended for tests and for code that generates configs" while being
+        /// <c>internal</c>, so no consumer could be the second kind of caller. Building
+        /// <c>Samples~/NetworkedPrediction</c> is what surfaced it: a package whose whole premise is
+        /// spawning from server snapshots at runtime must let a consumer build a catalog without
+        /// authored assets, and the fields are <c>[SerializeField] private</c> so there is no other
+        /// way to do it outside the Editor.
         /// </remarks>
-        internal void Configure(
+        public void Configure(
             string key,
             int pool = 1,
             float uniformScale = 1f,
