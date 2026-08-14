@@ -246,6 +246,27 @@ namespace Cuvara.DOTS.Tests.Prediction
         }
 
         [Test]
+        public void TheTwoAnchorFields_Correspond_UnderAnIdentityMapping()
+        {
+            // Position is the view's field, ServerPosition is the predictor's, and they must never
+            // silently diverge. Asserted under XZPlane specifically, where the mapping is a pure
+            // swizzle with no offset, so correspondence is exact and any future change that made
+            // one field stop tracking the other fails here rather than showing up as prediction
+            // drift. It is NOT an invitation to derive one from the other — see
+            // ServerPosition_SurvivesAMappingThatWouldNotRoundTrip for why that is forbidden.
+            DotsPredictionBootstrap.Install(_world, Predictor(), _worldState);
+
+            SpawnLocal(8.25f, -1.5f);
+            Tick();
+
+            var anchor = _entityManager.GetComponentData<ReconciliationAnchor>(Local());
+            Assert.AreEqual(new float3(8.25f, 0f, -1.5f), anchor.Position);
+            Assert.AreEqual(new float2(8.25f, -1.5f), anchor.ServerPosition);
+            Assert.AreEqual(SnapshotSpaceMapping.XZPlane.ToWorld(anchor.ServerPosition.x, anchor.ServerPosition.y),
+                anchor.Position, "the two fields describe the same point in different spaces");
+        }
+
+        [Test]
         public void NoPredictionInstalled_LeavesEverythingToTheAdapter()
         {
             // The package must behave exactly as it did before this assembly existed when nothing

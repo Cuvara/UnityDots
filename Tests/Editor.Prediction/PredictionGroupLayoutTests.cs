@@ -41,6 +41,28 @@ namespace Cuvara.DOTS.Tests.Prediction
         }
 
         [Test]
+        public void TheDependencyRunsOneWayOnly()
+        {
+            // The split exists so the adapter still compiles with Shared.GameLogic absent. If either
+            // of the two older assemblies ever referenced this one, that property is gone — and it
+            // would go quietly, because a project with both packages installed compiles either way.
+            // Only a project missing one would notice, which is to say: only CI's third row.
+            var prediction = typeof(LocalPredictionSystem).Assembly.GetName().Name;
+
+            foreach (var upstream in new[]
+                     {
+                         typeof(Cuvara.DOTS.Netcode.DotsEntityView).Assembly,
+                         typeof(Cuvara.DOTS.Views.EntityViewRegistry).Assembly,
+                     })
+            {
+                CollectionAssert.DoesNotContain(
+                    upstream.GetReferencedAssemblies().Select(a => a.Name).ToArray(),
+                    prediction,
+                    $"{upstream.GetName().Name} must not reference {prediction} — the arrow is one-way");
+            }
+        }
+
+        [Test]
         public void NothingHereIsAutoCreated()
         {
             foreach (var type in new[]

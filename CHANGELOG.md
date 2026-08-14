@@ -5,6 +5,67 @@ All notable changes to the Cuvara DOTS package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-08-14
+
+### Added — a third CI configuration
+
+`Unity Tests (no optional packages)`: neither `com.cuvara.netcode` nor
+`com.rpgmmo.shared-gamelogic`.
+
+**Until this row existed, every job installed `com.rpgmmo.shared-gamelogic`**, so the absent path of
+`CUVARA_SHARED_GAMELOGIC` had never once been taken. That gate was asserted, never proven — the shape
+of a gate that quietly never fires.
+
+It is also the only row that can prove `Cuvara.DOTS.Netcode.Prediction` is gated on **both** defines
+rather than only on netcode: the assembly must be absent here for a reason that is not the netcode
+one. A row that can only fail one way is worth less than one that can fail two.
+
+| | netcode absent | netcode 0.6.2 | no optional packages |
+|---|---|---|---|
+| `Tests.Editor` | 30 | 30 | 30 |
+| `Tests.Runtime` | 23 | 23 | 23 |
+| `Tests.GameLogic` | 41 | 41 | **0** |
+| `Tests.Netcode` | 0 | 47 | 0 |
+| `Tests.Prediction` | 0 | 14 | 0 |
+| `Cuvara.DOTS.GameLogic.dll` | present | present | **absent** |
+| `Cuvara.DOTS.Netcode.dll` | absent | present | absent |
+| `Cuvara.DOTS.Netcode.Prediction.dll` | absent | present | absent |
+
+### Added — two tests
+
+- **`TheDependencyRunsOneWayOnly`** — neither `Cuvara.DOTS.Runtime` nor `Cuvara.DOTS.Netcode` may
+  reference `Cuvara.DOTS.Netcode.Prediction`. If either ever did, the standalone-install property
+  would be gone, and it would go *quietly*: a project with both optional packages compiles either
+  way, so only a project missing one would notice — which is to say, only the third CI row.
+- **`TheTwoAnchorFields_Correspond_UnderAnIdentityMapping`** — `Position` and `ServerPosition`
+  describe the same point in different spaces, asserted under `XZPlane` where the mapping is a pure
+  swizzle and correspondence is exact. It is explicitly **not** licence to derive one from the other;
+  `ServerPosition_SurvivesAMappingThatWouldNotRoundTrip` is the test that forbids that, and the two
+  are meant to be read together.
+
+### Documented
+
+The CI header now records, as a standing property rather than an incidental one, that **every job
+installs the minimum its configuration names and hand-feeds nothing on a dependency's behalf** — with
+the two findings that property has already produced about `com.cuvara.netcode`, and an instruction not
+to "simplify" a failing row by adding the convenient dependency. A gate that supplies what the package
+under test failed to declare is not a gate.
+
+### Changed
+
+- CI installs netcode **v0.6.2**, which adds `PredictionSurfaceContractTests` pinning the six members
+  that cross the seam. The driver was written against the tagged package and its four call sites —
+  `Reconcile(Vec2, long)`, `Advance(float)`, `Position`, `IsEnabled` — match the pinned signatures.
+
+### Found in another package
+
+**`com.cuvara.netcode` 0.6.2 still cannot be installed standalone**, and this is the third undeclared
+dependency in it: `Cuvara.Netcode.Runtime.asmdef` references `Shared.GameLogic` with no
+`defineConstraints` gate, while `package.json` declares only `com.cysharp.unitask` and two Unity
+modules. `Shared.GameLogic` is a git-URL package, and the `gitDependencies` key netcode carries is not
+a UPM field — UPM ignores it. So every consumer must hand-add that git URL, and netcode's own CI does
+exactly that in its bootstrap manifest, which is why the gap is invisible there.
+
 ## [0.13.0] - 2026-08-14
 
 ### Added
