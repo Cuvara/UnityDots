@@ -30,6 +30,13 @@ namespace Cuvara.DOTS.Netcode.Prediction
     /// both and why the mapping still has no inverse.
     /// </para>
     /// <para>
+    /// <b>It also feeds the server's speed.</b> <c>PredictionSettings.Speed</c> is fixed at
+    /// construction, and a client integrating at a different rate from the server desyncs every
+    /// tick with no error on either side — the failure looks exactly like a badly tuned predictor.
+    /// The wire has carried per-entity speed since netcode 0.8.0, so this system reads it from
+    /// <c>WorldState</c> and calls <c>SetServerSpeed</c> before each reconcile.
+    /// </para>
+    /// <para>
     /// <b>Input is not sampled here.</b> <c>RecordInput</c> belongs to whatever reads the device and
     /// sends the move to the server, because the tick it records must be the tick that was sent. A
     /// system that invented its own input would produce a buffer the server never saw, and replay
@@ -105,6 +112,35 @@ namespace Cuvara.DOTS.Netcode.Prediction
                 if (ackTick > _lastAckTick)
                 {
                     _lastAckTick = ackTick;
+
+                    // Speed first, then position — the same order WorldViewBinder uses on the
+                    // GameObject path, and the order matters: Reconcile replays every
+                    // unacknowledged input, so replaying at a stale speed integrates the whole
+                    // backlog at the wrong rate.
+                    //
+                    // It is read here rather than carried on ReconciliationAnchor because the
+                    // anchor is written from IEntityView.SetState, which carries no speed — the
+                    // wire value only exists on WorldState. And it is read here rather than left
+                    // to the consumer because netcode's binder feeds it ONLY in its predictor
+                    // overload, which its own docs tell the DOTS path not to use: "hand the
+                    // predictor to that system instead". That leaves this system as the only thing
+                    // that can.
+                    //
+                    // Non-positive is ignored inside SetServerSpeed — on the wire that means "not
+                    // sent" — so a server that never populates it leaves the constructed fallback
+                    // standing rather than collapsing the speed to zero.
+                    if (reference.World != null)
+                    {
+                        // ToString allocates, once per reconcile rather than once per frame: at a
+                        // 15 Hz tick that is a handful of short-lived strings a second. Interning
+                        // it is a change to make when a profiler says so, not before.
+                        var wireId = entityManager.GetComponentData<NetworkEntity>(entity).Id.ToString();
+                        if (reference.World.TryGet(wireId, out var snapshot))
+                        {
+                            predictor.SetServerSpeed(snapshot.Speed);
+                        }
+                    }
+
                     predictor.Reconcile(ToVec2(anchor.ServerPosition), ackTick);
                 }
 

@@ -59,8 +59,10 @@ namespace Cuvara.DOTS.Samples.NetworkedPrediction
         [Tooltip("Off makes the adapter the only writer of LocalTransform — the A/B this sample exists for.")]
         [SerializeField] private bool predictionEnabled = true;
 
-        [Tooltip("Must match the server's Locomotion.Speed for this entity.")]
-        [SerializeField] private float moveSpeed = 5f;
+        [Tooltip("Fallback only, used before the first snapshot. The wire carries per-entity speed " +
+                 "since netcode 0.8.0, and the prediction driver feeds the server's value in on every " +
+                 "reconcile — so this no longer has to match the server to predict correctly.")]
+        [SerializeField] private float fallbackMoveSpeed = 5f;
 
         private World _world;
         private EntityViewRegistry _registry;
@@ -129,7 +131,7 @@ namespace Cuvara.DOTS.Samples.NetworkedPrediction
             // disagrees with the server the moment the shared package moves.
             _predictor = new LocalMovePredictor(new PredictionSettings(
                 GameConstants.DefaultTickRate,
-                predictionEnabled ? moveSpeed : 0f,
+                predictionEnabled ? fallbackMoveSpeed : 0f,
                 new MapBounds(0f, 0f, GameConstants.DefaultMapWidth, GameConstants.DefaultMapHeight)));
 
             DotsPredictionBootstrap.Install(_world, _predictor, _client.World);
@@ -266,7 +268,7 @@ namespace Cuvara.DOTS.Samples.NetworkedPrediction
             Line("pooled views: " + (live.Length == 0 ? "(none)" : live));
 
             Line($"prediction: {(_predictor.IsEnabled ? "on" : "OFF")}   pending {_predictor.PendingCount}" +
-                 $"   replayed {_predictor.ReplayedSteps}");
+                 $"   replayed {_predictor.ReplayedSteps}   speed {_predictor.EffectiveSpeed:F2}");
             Line($"corrections: last {_predictor.LastCorrection:F3}   snaps {_predictor.Snaps}" +
                  $"   smoothed {_predictor.SmoothedCorrections}");
             Line($"dropped {_predictor.DroppedInputs}   rejected {_predictor.RejectedInputs}");

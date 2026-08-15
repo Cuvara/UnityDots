@@ -5,6 +5,59 @@ All notable changes to the Cuvara DOTS package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-08-15
+
+### Fixed — the prediction driver now feeds the server's speed
+
+`LocalPredictionSystem` reads the local entity's speed from `WorldState` and calls
+`LocalMovePredictor.SetServerSpeed` immediately before each `Reconcile`.
+
+**Nothing failed without this, which is the point.** `PredictionSettings.Speed` is fixed at
+construction, and a client integrating at a different rate from the server desyncs every tick with no
+error on either side. By eye it is indistinguishable from a badly tuned predictor, so the debugging
+goes to the wrong place. The wire has carried per-entity speed since netcode 0.8.0; until now the
+DOTS path ignored it and ran on whatever literal the consumer constructed with.
+
+**Why it belongs in the driver rather than in the sample or on the anchor:**
+
+- Not on `ReconciliationAnchor` — the anchor is written from `IEntityView.SetState`, which carries no
+  speed. The wire value exists only on `WorldState`.
+- Not left to the consumer — `WorldViewBinder` feeds it, but **only in its predictor overload**, which
+  netcode's own docs tell the DOTS path not to use: *"hand the predictor to that system instead"*.
+  That leaves this system as the only thing that can.
+- Speed is set **before** position, matching the binder. `Reconcile` replays every unacknowledged
+  input, so replaying at a stale speed integrates the whole backlog at the wrong rate.
+
+A non-positive wire value means "not sent" and is ignored inside `SetServerSpeed`, so a server that
+never populates it leaves the constructed fallback standing rather than collapsing speed to zero.
+
+### Changed
+
+- The sample's `moveSpeed` is now `fallbackMoveSpeed` — used before the first snapshot and nothing
+  more. It no longer has to match the server, which removes a literal that was **only correct until
+  someone changed a server constant, and would then have failed silently**.
+- The overlay shows `speed`, so a mismatch is visible rather than inferred.
+- CI's netcode row installs **v0.9.1** (was 0.6.2). The gate was sound — the `versionDefines`
+  expression is `>=` — but the row was validating against an older netcode than the project runs.
+
+### Tests
+
+16 in `Tests/Editor.Prediction/` (was 14). Two new, and they exist because nothing else can fail when
+this is wrong:
+
+- the wire's speed reaching the predictor and **winning over** the constructed value;
+- a zero wire speed leaving the fallback in place rather than freezing prediction while every counter
+  still looks healthy.
+
+### Measured
+
+Prediction removes **~72 ms** of input-to-visible on a live local server — median 0.1 ms on, 72.0 ms
+off, 20 samples per configuration. Not keypress-to-visible: keyboard, OS input stack and display sit
+outside the engine, but those legs are identical in both runs, so the difference is sound.
+
+That measurement was taken with netcode's own harness, not this sample. **This package's sample still
+has not been run against a live server.**
+
 ## [0.15.0] - 2026-08-14
 
 ### Added

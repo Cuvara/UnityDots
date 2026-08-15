@@ -4,6 +4,7 @@ using Cuvara.DOTS.Netcode;
 using Cuvara.DOTS.Netcode.Prediction;
 using Cuvara.DOTS.Views;
 using Cuvara.Netcode.Prediction;
+using Cuvara.Netcode.Snapshot;
 using Cuvara.Netcode.View;
 using Cuvara.Netcode.World;
 using NUnit.Framework;
@@ -264,6 +265,51 @@ namespace Cuvara.DOTS.Tests.Prediction
             Assert.AreEqual(new float2(8.25f, -1.5f), anchor.ServerPosition);
             Assert.AreEqual(SnapshotSpaceMapping.XZPlane.ToWorld(anchor.ServerPosition.x, anchor.ServerPosition.y),
                 anchor.Position, "the two fields describe the same point in different spaces");
+        }
+
+        /// <summary>Feeds the world one snapshot carrying a speed, as the wire would.</summary>
+        private void ApplyServerSnapshot(string id, float x, float y, float speed, long tick)
+        {
+            _worldState.Apply(new ResolvedSnapshot(
+                tick,
+                ackTick: tick,
+                full: true,
+                entities: new[] { new ResolvedEntity(id, PlayerType, x, y, 100, 100, speed) },
+                removed: null));
+        }
+
+        [Test]
+        public void TheServersSpeed_ReachesThePredictor_RatherThanTheConstructedFallback()
+        {
+            // PredictionSettings.Speed is fixed at construction, and a client integrating at a
+            // different rate from the server desyncs every tick with NO error on either side. By
+            // eye that is indistinguishable from a badly tuned predictor, which is why it is worth
+            // a test rather than a comment: nothing else fails when it is wrong.
+            var predictor = Predictor();               // constructed at 5
+            DotsPredictionBootstrap.Install(_world, predictor, _worldState);
+
+            SpawnLocal();
+            ApplyServerSnapshot("uuid-me", 0f, 0f, speed: 7.5f, tick: 1);
+            Tick();
+
+            Assert.AreEqual(7.5f, predictor.EffectiveSpeed, 1e-4f,
+                "the wire value must win over the value the predictor was constructed with");
+        }
+
+        [Test]
+        public void AServerThatSendsNoSpeed_LeavesTheFallbackStanding()
+        {
+            // Zero on the wire means "not sent", not "speed is zero". Collapsing to zero would
+            // freeze prediction while leaving every counter looking healthy.
+            var predictor = Predictor();
+            DotsPredictionBootstrap.Install(_world, predictor, _worldState);
+
+            SpawnLocal();
+            ApplyServerSnapshot("uuid-me", 0f, 0f, speed: 0f, tick: 1);
+            Tick();
+
+            Assert.AreEqual(5f, predictor.EffectiveSpeed, 1e-4f,
+                "a non-positive wire speed must leave the constructed fallback in place");
         }
 
         [Test]
