@@ -193,7 +193,7 @@ jobs:
         run: |
           python3 package/.github/scripts/assert_test_floors.py artifacts \
             'Cuvara.DOTS.Tests.Editor>=30' \
-            'Cuvara.DOTS.Tests.Runtime>=23' \
+            'Cuvara.DOTS.Tests.Runtime>=26' \
             'Cuvara.DOTS.Tests.GameLogic>=41' \
             'Cuvara.DOTS.Tests.Netcode==0' \
             'Cuvara.DOTS.Tests.Prediction==0'
@@ -337,7 +337,7 @@ jobs:
         run: |
           python3 package/.github/scripts/assert_test_floors.py artifacts \
             'Cuvara.DOTS.Tests.Editor>=30' \
-            'Cuvara.DOTS.Tests.Runtime>=23' \
+            'Cuvara.DOTS.Tests.Runtime>=26' \
             'Cuvara.DOTS.Tests.GameLogic>=41' \
             'Cuvara.DOTS.Tests.Netcode>=47' \
             'Cuvara.DOTS.Tests.Prediction>=16'
@@ -443,7 +443,7 @@ jobs:
         run: |
           python3 package/.github/scripts/assert_test_floors.py artifacts \
             'Cuvara.DOTS.Tests.Editor>=30' \
-            'Cuvara.DOTS.Tests.Runtime>=23' \
+            'Cuvara.DOTS.Tests.Runtime>=26' \
             'Cuvara.DOTS.Tests.GameLogic==0' \
             'Cuvara.DOTS.Tests.Netcode==0' \
             'Cuvara.DOTS.Tests.Prediction==0'

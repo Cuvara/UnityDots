@@ -5,10 +5,35 @@ using Unity.Transforms;
 
 namespace Cuvara.DOTS.Simulation
 {
-    /// <summary>Rotates every <see cref="SpinSpeed"/> entity about its Y axis.</summary>
+    /// <summary>Rotates entities about Y at <see cref="SpinSpeed.RadiansPerSecond"/>.</summary>
     /// <remarks>
-    /// Last in <see cref="MovementSystemGroup"/> only to fix an order; it writes rotation and the
-    /// two movement systems write position, so it cannot actually contend with them.
+    /// Each entity's new rotation depends only on its own current rotation, so the work is
+    /// embarrassingly parallel and the job is scheduled with <c>ScheduleParallel</c>.
+    /// </remarks>
+    [BurstCompile]
+    internal partial struct SpinJob : IJobEntity
+    {
+        public float DeltaTime;
+
+        private void Execute(ref LocalTransform transform, in SpinSpeed spin)
+        {
+            transform = transform.RotateY(spin.RadiansPerSecond * DeltaTime);
+        }
+    }
+
+    /// <summary>Spins everything with a <see cref="SpinSpeed"/>.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Parallel since 0.17.0.</b> Before that this was a Bursted <c>SystemAPI.Query</c> loop —
+    /// optimised machine code on exactly one thread. The foundation was right and the parallelism
+    /// was never built on top of it.
+    /// </para>
+    /// <para>
+    /// <c>state.Dependency</c> is threaded in and out rather than the job being completed here:
+    /// completing inside the system would serialise it against every other system in the frame and
+    /// throw away most of the benefit. The job system resolves the ordering from the component
+    /// access patterns it already knows.
+    /// </para>
     /// </remarks>
     [BurstCompile]
     [DisableAutoCreation]
@@ -25,13 +50,10 @@ namespace Cuvara.DOTS.Simulation
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            var deltaTime = SystemAPI.Time.DeltaTime;
-
-            foreach (var (transform, spin) in
-                     SystemAPI.Query<RefRW<LocalTransform>, RefRO<SpinSpeed>>())
+            state.Dependency = new SpinJob
             {
-                transform.ValueRW = transform.ValueRO.RotateY(spin.ValueRO.RadiansPerSecond * deltaTime);
-            }
+                DeltaTime = SystemAPI.Time.DeltaTime,
+            }.ScheduleParallel(state.Dependency);
         }
     }
 }

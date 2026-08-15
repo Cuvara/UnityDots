@@ -72,10 +72,12 @@ def _(tmp):
     return code == 1 and "actual 0" in out
 
 
-@case("empty artifacts directory fails")
+@case("empty artifacts directory fails, naming compile errors rather than floors")
 def _(tmp):
+    # The all-zero case must not read like "this one assembly vanished". It is almost
+    # always one compile error collapsing the whole run.
     code, out = run(tmp, {}, ["A>=1"])
-    return code == 1 and "actual 0" in out
+    return code == 1 and "NO test assemblies ran at all" in out and "error CS" in out
 
 
 @case("a failing test fails the run even when every floor is met")

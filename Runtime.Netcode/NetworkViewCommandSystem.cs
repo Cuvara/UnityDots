@@ -30,6 +30,33 @@ namespace Cuvara.DOTS.Netcode
     /// <b>Not Bursted.</b> It reads a managed queue through a managed singleton. Marking it
     /// <c>[BurstCompile]</c> would be a claim the code cannot honour.
     /// </para>
+    /// <para>
+    /// <b>Deliberately not parallelised, and this was examined rather than skipped.</b> The
+    /// simulation systems became <c>IJobEntity</c>/<c>ScheduleParallel</c> in 0.17.0; this one did
+    /// not, for three reasons that do not go away with effort:
+    /// </para>
+    /// <list type="number">
+    /// <item><description>
+    /// <b>The drain is ordered by definition.</b> The queue's whole guarantee is that spawn precedes
+    /// its first state and despawn follows its last. A parallel drain has no order, so the guarantee
+    /// would have to be rebuilt with a sequence number — which is the FIFO again, more expensively.
+    /// </description></item>
+    /// <item><description>
+    /// <b>Two commands in one drain can target the same entity</b> — two <c>SetState</c>s for one id
+    /// when snapshots outpace frames — and the correct result is "last wins". Writing the same
+    /// component from two workers is a race whose outcome is the scheduler's, so the apply half
+    /// cannot be split without first de-duplicating by id, and that de-duplication is a serial pass
+    /// over the same data the serial apply already walks.
+    /// </description></item>
+    /// <item><description>
+    /// <b>It creates and destroys entities.</b> That is main-thread work or command-buffer work, and
+    /// the command-buffer route buys nothing here because the recording is the cheap part.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// The work is also bounded by the AOI rather than by anything that grows, so this is tens of
+    /// commands per frame, not thousands. Parallelising it would be parallelism for its own sake.
+    /// </para>
     /// </remarks>
     // In SnapshotApplyGroup, inside NetcodeSystemGroup, inside InitializationSystemGroup — so
     // entities and transforms written here are seen by this frame's TransformSystemGroup and this

@@ -111,9 +111,22 @@ def main(argv):
     for path in files:
         print(f"  {path}")
 
-    print("\nExecuted test cases by assembly:")
+    # Nothing at all ran. That is a DIFFERENT failure from "one assembly is missing",
+    # and without saying so every floor below reports `actual 0`, which reads exactly
+    # like every assembly vanishing. The real cause is almost always a single compile
+    # error: one test assembly that fails to build collapses the entire EditMode run,
+    # so the runner writes no result XML and every floor goes to zero together.
+    # This cost twenty minutes once; the message is cheaper than the next twenty.
     if not per_assembly:
-        print("  (none)")
+        print("::error::NO test assemblies ran at all — not one, which is not the same as a "
+              "floor being missed. Look ABOVE this step for 'error CS' first: a single test "
+              "assembly that fails to compile collapses the whole run and zeroes every floor "
+              "together. Check the version pins in the job's manifest before suspecting "
+              "defineConstraints — a package pinned behind what another package requires fails "
+              "inside THAT package's source, not yours.")
+        return 1
+
+    print("\nExecuted test cases by assembly:")
     for name in sorted(per_assembly):
         counts = per_assembly[name]
         total = sum(counts.values())

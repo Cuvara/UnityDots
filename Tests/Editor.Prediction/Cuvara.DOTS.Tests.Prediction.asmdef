@@ -14,11 +14,15 @@
         "Unity.Mathematics",
         "Unity.Transforms"
     ],
-    "includePlatforms": ["Editor"],
+    "includePlatforms": [
+        "Editor"
+    ],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": true,
-    "precompiledReferences": ["nunit.framework.dll"],
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
     "autoReferenced": false,
     "defineConstraints": [
         "UNITY_INCLUDE_TESTS",
@@ -26,8 +30,16 @@
         "CUVARA_SHARED_GAMELOGIC"
     ],
     "versionDefines": [
-        { "name": "com.cuvara.netcode", "expression": "0.6.0", "define": "CUVARA_NETCODE" },
-        { "name": "com.rpgmmo.shared-gamelogic", "expression": "", "define": "CUVARA_SHARED_GAMELOGIC" }
+        {
+            "name": "com.cuvara.netcode",
+            "expression": "0.8.0",
+            "define": "CUVARA_NETCODE"
+        },
+        {
+            "name": "com.rpgmmo.shared-gamelogic",
+            "expression": "",
+            "define": "CUVARA_SHARED_GAMELOGIC"
+        }
     ],
     "noEngineReferences": false
 }

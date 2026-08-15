@@ -5,6 +5,107 @@ All notable changes to the Cuvara DOTS package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-08-15
+
+### The core is actually multithreaded now
+
+Every pure simulation system was `[BurstCompile]` `ISystem` with a `SystemAPI.Query` loop —
+**optimised machine code on exactly one thread**. There was not a single `IJobEntity` or
+`ScheduleParallel` in the package. The foundation was right; the parallelism was never built on it.
+
+Five systems converted to `IJobEntity` scheduled with `ScheduleParallel`:
+
+| System | Job | Structural |
+|---|---|---|
+| `SpinSystem` | `SpinJob` | no |
+| `MoveBounceSystem` | `MoveBounceJob` | no |
+| `MoveTowardSystem` | `MoveTowardJob` | no |
+| `HealthDeathSystem` | `HealthDeathJob` | `EntityCommandBuffer.ParallelWriter` |
+| `TimeToLiveSystem` | `TimeToLiveJob` | `EntityCommandBuffer.ParallelWriter` |
+
+`state.Dependency` is threaded in and out rather than completed inside each system: completing there
+would serialise the job against every other system in the frame and throw away most of the benefit.
+
+**The sort key is `[ChunkIndexInQuery]`, and that is a determinism decision, not a style one.**
+Command-buffer playback replays in sort-key order. Worker threads finish in whatever order the
+scheduler gives them, so without a stable key the playback order — and the outcome — would vary run
+to run on identical input.
+
+### Two systems deliberately left single-threaded
+
+Examined, not skipped, and the reasoning is in the code where the next person will look.
+
+**`NetworkViewCommandSystem`** — the queue drain is ordered by definition (spawn precedes its first
+state, despawn follows its last), so a parallel drain would have to rebuild the FIFO with a sequence
+number. Worse, two `SetState`s for one id can arrive in a single drain and the correct result is
+"last wins" — splitting the apply would race two workers on one component, and de-duplicating first
+is a serial pass over the same data the serial apply already walks. The work is AOI-bounded anyway:
+tens of commands per frame, not thousands.
+
+**`LocalPredictionSystem`** — one predictor instance owns an input ring buffer, and `RecordInput`,
+`Reconcile`, `Advance` are order-dependent against it; `Reconcile` replays the whole unacknowledged
+backlog in sequence. Parallelising would not crash, it would produce a plausible wrong position —
+the failure shape this project has paid for most — in exchange for nothing, since exactly one entity
+is ever predicted.
+
+### Measured, not asserted
+
+`ParallelSchedulingBenchmark` (PlayMode) times **the same job two ways** — `Run()` versus
+`ScheduleParallel().Complete()` — across 64 → 65,536 entities and prints a table with the crossover
+point. Same Bursted code over the same chunks both ways, so what is measured is worker parallelism
+minus scheduling overhead, and nothing else. Comparing a job against a hand-written loop would fold
+in codegen differences and measure the wrong thing.
+
+**No timing is asserted.** A performance assertion on a shared CI runner is a flaky test, and a flaky
+test inside a gate is worse than no measurement — it teaches people to re-run until green. The
+numbers are logged for reading; the assertions are about correctness.
+
+`BothSchedules_ProduceBitIdenticalResults` is the one that had to be earned: identical input through
+both paths, **bit-identical** output, eight steps of integration. A parallel job whose result depends
+on iteration order is a bug that reproduces about one run in ten, and these systems produce positions
+a predictor may later reconcile against. "Approximately equal" is how a drift bug survives its own
+test.
+
+### Measured — and the measurement environment failed, which is itself the result
+
+**CI cannot measure this, and the benchmark proved it rather than papering over it.** Two runs of
+identical code, same commit, gave for the same 65,536-entity `SpinJob` case:
+
+```
+run 1:  Run() 0.88 ms   Parallel 0.57 ms    (13 ns/entity)
+run 2:  Run() 80.07 ms  Parallel 72.60 ms   (1221 ns/entity)
+```
+
+**90× apart.** The cause is in this workflow: it runs three Unity jobs concurrently, each requesting
+four CPUs from one host, so a benchmark measures contention as much as parallelism. `ns/entity` is
+the tell — a trivial `RotateY` costing a microsecond per entity is not measuring compute.
+
+So **no speedup figure from CI is quotable**, and none is quoted. What survives:
+
+- **The shape is consistent across both runs**: parallel loses at small counts and wins at large
+  ones, which is the crossover behaviour the design predicts. Run 1 put `SpinJob`'s crossover at
+  4,096 entities.
+- **`BurstCompiler.IsEnabled: True`** in the run, and Burst exposes no per-job "was this compiled"
+  query — so `ns/entity` is the only available cross-check, and it is reported for exactly that.
+- **The correctness assertion passed in every run**, and it is machine-independent:
+  `BothSchedules_ProduceBitIdenticalResults`, eight integration steps, bit-identical output.
+
+The benchmark now prints a warning saying its own numbers are not quotable from CI. **Running it on
+the real machine is one filtered PlayMode run** and is the only way to get figures worth acting on.
+
+### Unverified
+
+Everything about performance. The conversion is correct — determinism asserted, both structural
+systems recording through a parallel writer with a stable sort key — but **whether it is faster on
+the target hardware is unmeasured**, and the CI numbers are evidence about the runner rather than
+about the code.
+
+## [0.16.1] - 2026-08-15
+
+Two corrections that missed the 0.16.0 merge by minutes — the branch was merged while this commit
+was still in flight, which orphaned it from CI and from the release. Content unchanged from what
+0.16.0 describes; this is the version that actually carries it.
+
 ## [0.16.0] - 2026-08-15
 
 ### Fixed — the prediction driver now feeds the server's speed
@@ -39,6 +140,28 @@ never populates it leaves the constructed fallback standing rather than collapsi
 - The overlay shows `speed`, so a mismatch is visible rather than inferred.
 - CI's netcode row installs **v0.9.1** (was 0.6.2). The gate was sound — the `versionDefines`
   expression is `>=` — but the row was validating against an older netcode than the project runs.
+
+### Fixed — three `versionDefines` minimums that were understated
+
+Found by auditing every pin after the stale `sgl` one, rather than by anything failing.
+
+`Cuvara.DOTS.Netcode.Prediction`, its tests and the sample declared `com.cuvara.netcode >= 0.6.0`
+(the sample, `0.6.2`) — while now calling `SetServerSpeed` and `EffectiveSpeed`, **which arrived in
+0.8.0**. On netcode 0.6.x the define would fire, the assemblies would compile, and they would fail
+with `CS1061`. That is **broken, not absent** — the exact inversion of the property those constraints
+exist to guarantee, introduced by this release's own fix. All three now say `0.8.0`.
+
+The adapter and its tests stay at `0.4.0`: they call nothing newer, and a minimum should be the
+version an assembly actually needs rather than the newest one available.
+
+### Fixed — the all-zero diagnostic
+
+When **no** result XML is produced, every floor reported `actual 0`, which reads exactly like every
+assembly vanishing. The real cause is almost always one compile error: a single test assembly that
+fails to build collapses the whole EditMode run. The 0.13.0 entry predicted this trap and it then
+cost someone twenty minutes for real, so the script now says so explicitly before printing any floor,
+and points at version pins as well as `defineConstraints` — a package pinned behind what another
+package requires fails inside *that package's* source, not in ours.
 
 ### Tests
 

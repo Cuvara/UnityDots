@@ -24,8 +24,16 @@
         "CUVARA_SHARED_GAMELOGIC"
     ],
     "versionDefines": [
-        { "name": "com.cuvara.netcode", "expression": "0.6.2", "define": "CUVARA_NETCODE" },
-        { "name": "com.rpgmmo.shared-gamelogic", "expression": "", "define": "CUVARA_SHARED_GAMELOGIC" }
+        {
+            "name": "com.cuvara.netcode",
+            "expression": "0.8.0",
+            "define": "CUVARA_NETCODE"
+        },
+        {
+            "name": "com.rpgmmo.shared-gamelogic",
+            "expression": "",
+            "define": "CUVARA_SHARED_GAMELOGIC"
+        }
     ],
     "noEngineReferences": false
 }

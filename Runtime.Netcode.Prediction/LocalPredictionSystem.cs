@@ -45,6 +45,15 @@ namespace Cuvara.DOTS.Netcode.Prediction
     /// <para>
     /// Not Bursted: it reaches a managed predictor through a managed singleton.
     /// </para>
+    /// <para>
+    /// <b>Never parallelise this, and the reason is not performance.</b> One predictor instance owns
+    /// an input ring buffer, and <c>RecordInput</c>, <c>Reconcile</c> and <c>Advance</c> are
+    /// order-dependent against it — <c>Reconcile</c> replays the entire unacknowledged backlog in
+    /// sequence. Running those from a worker thread, or for several entities concurrently, would not
+    /// crash: it would produce a plausible wrong position. That failure shape — a wrong answer rather
+    /// than an exception — is the one this project has paid for most often, and there is nothing to
+    /// gain in exchange, because exactly one entity is ever predicted.
+    /// </para>
     /// </remarks>
     // In PredictionSystemGroup, which runs after SnapshotApplyGroup — so the anchor read here was
     // written by this frame's snapshot, not the previous one. Reconciling against a stale anchor is

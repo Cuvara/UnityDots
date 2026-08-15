@@ -4,29 +4,33 @@ using Unity.Entities;
 
 namespace Cuvara.DOTS.Simulation
 {
-    /// <summary>Destroys entities whose <see cref="Health.Current"/> has reached zero or below.</summary>
+    /// <summary>Queues destruction for any entity whose <see cref="Health"/> reached zero.</summary>
+    /// <remarks>
+    /// Read-only over <see cref="Health"/> and structural only through the command buffer, so it
+    /// parallelises with no ordering constraint between entities. See <see cref="TimeToLiveJob"/>
+    /// for why the sort key must be a stable chunk index rather than a counter.
+    /// </remarks>
+    [BurstCompile]
+    internal partial struct HealthDeathJob : IJobEntity
+    {
+        public EntityCommandBuffer.ParallelWriter CommandBuffer;
+
+        private void Execute([ChunkIndexInQuery] int chunkIndex, Entity entity, in Health health)
+        {
+            if (health.Current <= 0) CommandBuffer.DestroyEntity(chunkIndex, entity);
+        }
+    }
+
+    /// <summary>Destroys entities at zero health.</summary>
     /// <remarks>
     /// <para>
-    /// <b>Two couplings were removed on the way in, and both mattered.</b> The reference version
-    /// filtered its query on a game-specific enemy tag, and incremented a game-specific stats
-    /// singleton. Neither can exist in a shared package: the tag is one game's vocabulary, and the
-    /// singleton makes the system fail — or silently do nothing — in any world that has not created
-    /// it. What is left is the rule itself, applied to whatever carries <see cref="Health"/>.
+    /// Parallel since 0.17.0; recording moved off the main thread, playback did not move at all.
     /// </para>
     /// <para>
-    /// <b>No death event is published.</b> The package's publisher seam is managed and lives in
-    /// <c>Cuvara.DOTS.DI</c>; reaching it from a Bursted <c>ISystem</c> is not possible, and adding a
-    /// managed drain per frame to carry a counter would cost more than it is worth. A consumer that
-    /// needs to observe deaths should watch its own component going away, or run its own system
-    /// before this one.
-    /// </para>
-    /// <para>
-    /// Destruction goes through <see cref="DotsEndSimulationCommandBufferSystem"/> — the package's
-    /// own buffer, which plays back at the end of <see cref="GameplaySystemGroup"/> and therefore
-    /// before the transform systems and long before any view is synced. Unity's
-    /// <c>EndSimulationEntityCommandBufferSystem</c>, which the reference used, plays back after the
-    /// transform systems and would leave exactly one group in which a view could be synced against a
-    /// corpse.
+    /// <b>Destroying twice is not a hazard here.</b> An entity carrying both <see cref="Health"/> at
+    /// zero and an expired <see cref="TimeToLive"/> is recorded by both jobs, and
+    /// <c>EntityCommandBuffer</c> playback tolerates a repeated destroy. That was already true
+    /// single-threaded; parallel recording does not change it.
     /// </para>
     /// </remarks>
     [BurstCompile]
@@ -48,10 +52,10 @@ namespace Cuvara.DOTS.Simulation
                 .GetSingleton<DotsEndSimulationCommandBufferSystem.Singleton>()
                 .CreateCommandBuffer(state.WorldUnmanaged);
 
-            foreach (var (health, entity) in SystemAPI.Query<RefRO<Health>>().WithEntityAccess())
+            state.Dependency = new HealthDeathJob
             {
-                if (health.ValueRO.Current <= 0) commandBuffer.DestroyEntity(entity);
-            }
+                CommandBuffer = commandBuffer.AsParallelWriter(),
+            }.ScheduleParallel(state.Dependency);
         }
     }
 }
