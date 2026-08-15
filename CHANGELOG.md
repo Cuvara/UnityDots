@@ -5,6 +5,65 @@ All notable changes to the Cuvara DOTS package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-08-15
+
+### Per-system thresholds, from real numbers
+
+12 cores, **Burst on**, median of 41 interleaved pairs:
+
+| job | crossover | speedup @ 65,536 |
+|---|---|---|
+| `SpinJob` | 4,096 | 4.03× |
+| `MoveBounceJob` | 16,384 | 2.45× |
+| `MoveTowardJob` | 16,384 | 3.28× |
+| `HealthDeathJob` | 65,536 | 1.16× |
+| `TimeToLiveJob` | 65,536 | 1.24× |
+
+`ParallelScheduling.MinimumEntities` is replaced by five named constants, each that job's own measured
+crossover. 0.19.0's single constant was honest for the data that existed — a floor against a measured
+pessimisation — but the jobs are different in kind: `SpinJob` writes one component and scales nearly
+4×, while `HealthDeathJob` and `TimeToLiveJob` reach 1.16× and 1.24× even at 65,536, where the
+per-entity work is one comparison and the command buffer dominates. The shared 16,384 would have
+scheduled those two at counts where they measured 0.45×–0.88×.
+
+They keep a threshold rather than being forced serial: a consumer running hundreds of thousands of
+entities should get the win, and this package's own consumer simply never reaches it.
+
+### Why the earlier crossovers were wrong, and predictably so
+
+A 12-core run with `BurstCompiler.IsEnabled == false` reported crossovers of 256 and 1,024. Those
+were **refused rather than adopted**, on the argument that Burst speeds the serial arm far more than
+it speeds scheduling overhead, so the true crossover had to be *higher*. Measurement confirmed it:
+serial `ns/entity` fell from ~535 to 1–13 — roughly two orders of magnitude — and the crossovers rose
+to 4,096–65,536.
+
+Adopting 256 would have scheduled every job from 256 entities upward while measuring 0.4×–0.7× in
+exactly the AOI-bounded range this package operates in: every frame made worse to win a case nobody
+reaches.
+
+### Fixed
+
+`MoveTowardJob`'s benchmark row is credible again — 73 → 5.5 ns/entity monotonically, instead of
+~585 for three sizes and then a 58× cliff. **Nothing about the job changed**; the fix was statistical,
+which is worth recording because the row looked like a workload bug and was a measurement bug.
+
+### Unverified — and a live risk from outside this package
+
+**The backend now runs multi-rate: critical 60 Hz, world 15 Hz**, with `tick_rate` on
+`JoinTokenResponse`. This package cannot consume it, and the chain is broken in two places upstream:
+
+- `com.cuvara.netcode` v0.10.4's `JoinTokenResponse` has **no `TickRate` field**, so the value is
+  dropped at parse.
+- `LocalMovePredictor` has **no tick-rate setter** — only `SetServerSpeed`. `PredictionSettings.TickRate`
+  is fixed at construction.
+
+So `Samples~/NetworkedPrediction` constructs the predictor with `GameConstants.DefaultTickRate`, which
+is **15**. If inputs are now drained and integrated at 60 Hz server-side, replay uses a `dt` four
+times too large and every reconcile overshoots — `PredictionSettings` itself says a tick-rate mismatch
+"scales every predicted step by the ratio". **This is the speed bug again, with a larger multiplier
+and no way to fix it from this package.** The moment netcode surfaces the wire value and adds a setter,
+`LocalPredictionSystem` feeds it in one branch beside the existing `SetServerSpeed` call.
+
 ## [0.20.0] - 2026-08-15
 
 ### The benchmark refuses to print a table when Burst is off

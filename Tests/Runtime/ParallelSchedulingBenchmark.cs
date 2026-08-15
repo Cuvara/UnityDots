@@ -254,12 +254,10 @@ namespace Cuvara.DOTS.Tests
 
         [Test] public void Spin() => Measure<SpinRunSystem, SpinParallelSystem>("SpinJob");
         [Test] public void MoveBounce() => Measure<MoveBounceRunSystem, MoveBounceParallelSystem>("MoveBounceJob");
-        // MoveToward's 65,536 row is NOT credible and must not be quoted: its ns/entity sits at
-        // ~585 for three consecutive sizes and then reports 10.1, a 58x drop that no scheduling
-        // effect produces. Something about that row measures a different amount of work than the
-        // others. The row is left in rather than deleted, because a visibly broken measurement is
-        // more useful than a missing one — but the job is scheduled by the shared threshold, not by
-        // this number.
+        // MoveToward's 65,536 row was incoherent before interleaving — ~585 ns/entity for three
+        // sizes then a 58x cliff to 10.1. With A/B interleaving and Burst on it reads 73 -> 5.5
+        // ns/entity monotonically and the caveat is gone. Recorded because the fix was statistical:
+        // nothing about the job changed.
         [Test] public void MoveToward() => Measure<MoveTowardRunSystem, MoveTowardParallelSystem>("MoveTowardJob");
         [Test] public void HealthDeath() => Measure<HealthDeathRunSystem, HealthDeathParallelSystem>("HealthDeathJob");
         [Test] public void TimeToLive() => Measure<TimeToLiveRunSystem, TimeToLiveParallelSystem>("TimeToLiveJob");

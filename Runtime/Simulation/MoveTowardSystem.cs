@@ -52,12 +52,11 @@ namespace Cuvara.DOTS.Simulation
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            // Scheduled only when there is enough work to pay for scheduling. See
-            // ParallelScheduling for the measurement — below the threshold every one of these jobs
-            // was slower scheduled than run, and this package's entity count is AOI-bounded, so the
-            // common case is below it.
+            // Scheduled only above this job's own measured crossover — see ParallelScheduling for
+            // the table. Below it this job was measurably slower scheduled than run, and this
+            // package's entity count is AOI-bounded, so the common case is below it.
             var job = new MoveTowardJob { DeltaTime = SystemAPI.Time.DeltaTime };
-            state.Dependency = _query.CalculateEntityCount() >= ParallelScheduling.MinimumEntities
+            state.Dependency = _query.CalculateEntityCount() >= ParallelScheduling.MoveTowardMinimum
                 ? job.ScheduleParallel(state.Dependency)
                 : job.Schedule(state.Dependency);
         }

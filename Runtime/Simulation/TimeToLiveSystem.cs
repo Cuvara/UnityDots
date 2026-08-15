@@ -65,15 +65,15 @@ namespace Cuvara.DOTS.Simulation
                 .GetSingleton<DotsEndSimulationCommandBufferSystem.Singleton>()
                 .CreateCommandBuffer(state.WorldUnmanaged);
 
-            // Scheduled only when there is enough work to pay for it — see ParallelScheduling.
-            // Both of these measured SLOWER scheduled than run at every count up to 65,536, so the
-            // threshold is doing real work here rather than guarding a marginal case.
+            // Scheduled only above this job's own measured crossover — see ParallelScheduling.
+            // This one is marginal even past it (1.16x-1.24x at 65,536), because the per-entity work
+            // is a single comparison and the command buffer dominates.
             var job = new TimeToLiveJob
             {
                 DeltaTime = SystemAPI.Time.DeltaTime,
                 CommandBuffer = commandBuffer.AsParallelWriter(),
             };
-            state.Dependency = _query.CalculateEntityCount() >= ParallelScheduling.MinimumEntities
+            state.Dependency = _query.CalculateEntityCount() >= ParallelScheduling.TimeToLiveMinimum
                 ? job.ScheduleParallel(state.Dependency)
                 : job.Schedule(state.Dependency);
         }

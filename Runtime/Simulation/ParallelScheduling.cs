@@ -1,47 +1,70 @@
 namespace Cuvara.DOTS.Simulation
 {
     /// <summary>
-    /// The entity count below which the package's jobs run on the calling thread instead of being
-    /// scheduled across workers.
+    /// Per-system entity counts at which scheduling across workers starts paying for itself.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>This number came out of a measurement that contradicted the change it was measuring.</b>
-    /// Converting the simulation systems to <c>ScheduleParallel</c> in 0.17.0 was the obvious win;
-    /// the benchmark then reported, on 4 cores, median of 41 interleaved pairs:
+    /// <b>Measured, on 12 cores, Burst on, median of 41 interleaved pairs.</b> Each constant is that
+    /// job's own crossover — the first tested count where <c>ScheduleParallel</c> overtook
+    /// <c>Schedule</c> — not a shared guess:
     /// </para>
     /// <code>
-    ///                    64      256     1024     4096    16384    65536
-    ///   SpinJob        0.40x    0.41x    0.54x    0.90x    1.63x    1.69x
-    ///   MoveBounceJob  0.73x    0.79x    0.91x    0.41x    0.98x    0.88x
-    ///   HealthDeathJob 0.67x    0.58x    0.73x    0.88x    0.45x    0.96x
-    ///   TimeToLiveJob  0.60x    0.46x    0.39x    0.55x    0.59x    0.88x
+    ///   job              crossover   speedup at 65,536
+    ///   SpinJob              4,096        4.03x
+    ///   MoveBounceJob       16,384        2.45x
+    ///   MoveTowardJob       16,384        3.28x
+    ///   HealthDeathJob      65,536        1.16x
+    ///   TimeToLiveJob       65,536        1.24x
     /// </code>
     /// <para>
-    /// Below a few thousand entities every job is <b>slower</b> scheduled than run — the scheduling
-    /// overhead is fixed and the work is not. That matters here specifically: this package's entity
-    /// count is bounded by the server's area of interest, which is tens to low hundreds, so an
-    /// unconditional <c>ScheduleParallel</c> would have made the common case worse in exchange for a
-    /// win nobody in this project reaches.
+    /// <b>Why per-system rather than one number.</b> 0.19.0 used a single constant and said so
+    /// honestly — it was a floor against a measured pessimisation, chosen when per-job data did not
+    /// exist. It does now, and the jobs are visibly different in kind: <c>SpinJob</c> writes one
+    /// component and scales nearly 4x, while <c>HealthDeathJob</c> and <c>TimeToLiveJob</c> reach
+    /// only 1.16x and 1.24x even at 65,536 — barely more than the scheduling costs. Giving those two
+    /// the shared 16,384 would have scheduled them at counts where they measured 0.45x–0.88x.
     /// </para>
     /// <para>
-    /// <b>16,384 is <see cref="SpinJob"/>'s measured crossover and nothing more.</b>
-    /// <c>MoveBounceJob</c>, <c>HealthDeathJob</c> and <c>TimeToLiveJob</c> never overtook their
-    /// serial form at any count up to 65,536, so their true thresholds are unknown and are certainly
-    /// higher than this. Using one constant is a deliberate simplification: it is a floor that
-    /// prevents the measured pessimisation, not a per-system tuning. Anyone raising a per-system
-    /// value should raise it against a fresh measurement on the target hardware.
+    /// <b>Marginal is not the same as useless.</b> The two cheap jobs keep a threshold rather than
+    /// being forced serial, because a consumer running hundreds of thousands of entities should get
+    /// the win; this package's own consumer will simply never reach it, since its entity count is
+    /// bounded by the server's area of interest — tens to low hundreds.
     /// </para>
     /// <para>
-    /// The crossover moves with core count, so this is a compile-time approximation of a runtime
-    /// property. It is deliberately conservative: being serial slightly past the true crossover
-    /// costs a little throughput, while being parallel below it costs on every frame at the counts
-    /// this package actually runs at.
+    /// <b>These replace numbers measured without Burst, which were wrong in a predictable
+    /// direction.</b> An earlier 12-core run reported crossovers of 256 and 1,024 with
+    /// <c>BurstCompiler.IsEnabled == false</c>: the serial arm was running managed at ~535 ns/entity
+    /// against 1–13 ns/entity compiled. Burst speeds the serial arm by roughly two orders of
+    /// magnitude while barely touching scheduling overhead, so the true crossover had to be
+    /// <i>higher</i>, never lower. Adopting 256 would have scheduled every job from 256 entities
+    /// upward while measuring 0.4x–0.7x in exactly the range this package operates in.
+    /// </para>
+    /// <para>
+    /// The crossover moves with core count, so these remain a compile-time approximation of a runtime
+    /// property. They are deliberately conservative in the same direction: staying serial slightly
+    /// past the true crossover costs a little throughput, while scheduling below it costs on every
+    /// frame at the counts actually seen.
     /// </para>
     /// </remarks>
     internal static class ParallelScheduling
     {
-        /// <summary>Schedule across workers at or above this many entities; run inline below it.</summary>
-        public const int MinimumEntities = 16384;
+        /// <summary>One component written, best scaling of the five.</summary>
+        public const int SpinMinimum = 4096;
+
+        /// <summary>Two components written; reflection branch limits vectorisation.</summary>
+        public const int MoveBounceMinimum = 16384;
+
+        /// <summary>Reads a target, writes a transform.</summary>
+        public const int MoveTowardMinimum = 16384;
+
+        /// <summary>
+        /// Marginal at 1.16x even at 65,536: the per-entity work is a single comparison, so the
+        /// command buffer and the schedule dominate.
+        /// </summary>
+        public const int HealthDeathMinimum = 65536;
+
+        /// <summary>Marginal at 1.24x for the same reason — one subtract and one comparison.</summary>
+        public const int TimeToLiveMinimum = 65536;
     }
 }
