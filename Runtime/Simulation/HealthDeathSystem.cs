@@ -38,9 +38,12 @@ namespace Cuvara.DOTS.Simulation
     [UpdateInGroup(typeof(LifecycleSystemGroup))]
     internal partial struct HealthDeathSystem : ISystem
     {
+        private EntityQuery _query;
+
         [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
+            _query = SystemAPI.QueryBuilder().WithAll<Health>().Build();
             state.RequireForUpdate<Health>();
             state.RequireForUpdate<DotsEndSimulationCommandBufferSystem.Singleton>();
         }
@@ -52,10 +55,16 @@ namespace Cuvara.DOTS.Simulation
                 .GetSingleton<DotsEndSimulationCommandBufferSystem.Singleton>()
                 .CreateCommandBuffer(state.WorldUnmanaged);
 
-            state.Dependency = new HealthDeathJob
+            // Scheduled only when there is enough work to pay for it — see ParallelScheduling.
+            // Both of these measured SLOWER scheduled than run at every count up to 65,536, so the
+            // threshold is doing real work here rather than guarding a marginal case.
+            var job = new HealthDeathJob
             {
                 CommandBuffer = commandBuffer.AsParallelWriter(),
-            }.ScheduleParallel(state.Dependency);
+            };
+            state.Dependency = _query.CalculateEntityCount() >= ParallelScheduling.MinimumEntities
+                ? job.ScheduleParallel(state.Dependency)
+                : job.Schedule(state.Dependency);
         }
     }
 }

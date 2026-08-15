@@ -5,6 +5,179 @@ All notable changes to the Cuvara DOTS package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-08-15
+
+### The benchmark refuses to print a table when Burst is off
+
+A 12-core run on the target machine produced a clean six-row table — and `BurstCompiler.IsEnabled:
+False` one line above it. 535 ns/entity for a `RotateY` is the managed path; the `ns/entity` column
+caught it, and the table was still nearly read as real. **A quotable-looking table under a
+`burst=False` line is the same shape as a gate reporting green over zero tests**, so the guard now
+skips the test and prints nothing instead.
+
+It **tries to fix the condition before giving up**: `BurstCompiler.Options.EnableBurstCompilation =
+true`, then re-checks. The setter coerces back to false when `ForceDisableBurstCompilation` is set,
+which is exactly what separates the two cases, and the skip message says which one you are in.
+
+### Why Burst was off, read out of Burst's own source
+
+`BurstCompilerOptions`' static constructor sets `ForceDisableBurstCompilation` for **four** reasons
+and no others:
+
+| Cause | Overridable from script? |
+|---|---|
+| `--burst-disable-compilation` command-line argument | no |
+| non-empty `UNITY_BURST_DISABLE_COMPILATION` env var | no |
+| `ENABLE_CORECLR` in the Editor | no |
+| `CheckIsSecondaryUnityProcess()` — includes `AssetDatabase.IsAssetImportWorkerProcess()` | no |
+
+None of those was present on the machine that ran it. The remaining cause is the Editor's own
+**Jobs > Burst > Enable Compilation** menu toggle, which is per-machine, **persists across sessions,
+and has no command-line override** — a batchmode run silently inherits whatever it was last left at.
+
+**So the honest position: this measurement needs the toggle on, and that is a human action in the
+Editor.** The guard now makes a run with it off produce a skip and an explanation rather than a
+table, so the next person does not rediscover this by nearly quoting a wrong number.
+
+Synchronous compilation is also requested (`EnableBurstCompileSynchronously`), because Burst compiles
+asynchronously by default and the warmup loop would otherwise measure the managed path on the way in.
+
+### Not guarded, deliberately
+
+`BothSchedules_ProduceBitIdenticalResults` runs regardless. Determinism is a property of the schedule,
+not of the compiler — it is the assertion still worth having when Burst is off, and it is the one that
+ran and passed on the machine where every timing was invalid.
+
+### The numbers that are sound, and the ones that are not
+
+From the 12-core run: **the speedup ratios are valid** — both arms ran under identical conditions, so
+`SpinJob` at 5.98× and `MoveBounceJob` at 6.47× at 65,536 are real parallel wins, plateauing near 6 on
+12 cores as memory bandwidth and scheduling begin to bind.
+
+**The crossovers from that run are not, and must not go into docs**: 256 and 1,024 entities were
+measured on the managed path, where the serial arm is ~30× slower than it will be with Burst on. Burst
+speeds the serial arm far more than it speeds scheduling overhead, so **the real crossover is
+substantially higher**. `ParallelScheduling.MinimumEntities` stays at 16,384 — still the CI figure, and
+still explicitly provisional — rather than being lowered to a number measured without the compiler.
+
+## [0.19.0] - 2026-08-15
+
+**The measurement contradicted the change, so the change moved.** 0.17.0 scheduled five simulation
+jobs with `ScheduleParallel` unconditionally. Measured on 4 cores, median of 41 interleaved pairs:
+
+```
+                   64      256     1024     4096    16384    65536
+  SpinJob        0.40x    0.41x    0.54x    0.90x    1.63x    1.69x
+  MoveBounceJob  0.73x    0.79x    0.91x    0.41x    0.98x    0.88x
+  HealthDeathJob 0.67x    0.58x    0.73x    0.88x    0.45x    0.96x
+  TimeToLiveJob  0.60x    0.46x    0.39x    0.55x    0.59x    0.88x
+```
+
+**Below a few thousand entities, every job is slower scheduled than run**, and three of the four
+never overtook their serial form at any count tested. Scheduling overhead is fixed; the work is not.
+
+That is not academic here: this package's entity count is bounded by the server's area of interest —
+tens to low hundreds — so shipping unconditional `ScheduleParallel` would have made the common case
+worse in exchange for a win nobody in this project reaches. It is the spatial-index mistake with
+different ceremony.
+
+### Changed — the schedule is chosen from the measurement
+
+Every simulation system is still an `IJobEntity`. Each now picks its schedule per update:
+
+```csharp
+state.Dependency = _query.CalculateEntityCount() >= ParallelScheduling.MinimumEntities
+    ? job.ScheduleParallel(state.Dependency)
+    : job.Schedule(state.Dependency);
+```
+
+`ParallelScheduling.MinimumEntities` is **16,384** — `SpinJob`'s measured crossover, and explicitly
+nothing more. The other three have unknown, certainly higher thresholds; one constant is a
+deliberate simplification documented as a floor against the measured pessimisation, not a per-system
+tuning. The crossover moves with core count, so this is a compile-time approximation of a runtime
+property, chosen conservatively: serial slightly past the true crossover costs a little throughput,
+parallel below it costs on every frame at the counts this package actually runs.
+
+### One benchmark row is not credible, and says so
+
+`MoveTowardJob` reports ~585 ns/entity at 1,024, 4,096 and 16,384 and then **10.1** at 65,536 — a
+58× drop no scheduling effect produces. That row is left in place with a comment rather than deleted:
+a visibly broken measurement is more useful than a missing one, and the job's schedule is driven by
+the shared threshold rather than by that number. It needs re-measuring on real hardware before
+anyone trusts a `MoveToward` figure.
+
+`SpinJob`, `HealthDeathJob` and `MoveBounceJob` all show flat ns/entity across the top three sizes,
+which is the internal consistency check that makes their rows usable.
+
+### Unverified
+
+The threshold is one machine's number, on four cores, from a shared runner. The **ratio** is credible
+after interleaving; the absolute crossover is not portable. A filtered PlayMode run on the target
+machine would give a real value, and is the one thing that would justify changing the constant.
+
+## [0.18.0] - 2026-08-15
+
+Completes the parallelism bar: every core system now either runs as a parallel job or carries a
+written, evidenced reason it does not, and the measurement is trustworthy enough to quote a ratio.
+
+### Corrected — a cause I asserted without checking
+
+0.17.0 blamed the 90x run-to-run timing variance on "three Unity containers sharing one host". That
+is wrong: **each GitHub Actions job runs on its own runner VM.** The variance is ordinary
+shared-cloud noise, and the fix is statistical rather than structural. Recording the correction
+because the original claim was exactly the kind of confident wrong diagnosis this package keeps
+paying for.
+
+### The benchmark can now be trusted for a ratio
+
+Timing all serial iterations and then all parallel ones lets a stall skew one column — which is how
+the same case reported 0.88 ms in one run and 80.07 ms in the next. Now:
+
+- **arms interleaved A/B/A/B**, so a stall lands in both halves of a pair;
+- **median of 41 pairs**, which discards the pairs that were hit;
+- **all five parallelised jobs measured**, not two standing in for five;
+- the structural pair creates and plays back its command buffer **inside** the measured region,
+  because recording through a `ParallelWriter` is part of what the parallel schedule costs and
+  excluding it would flatter the result;
+- `Health` and `TimeToLive` seeded so nothing is destroyed — the realistic steady state is a scan
+  over live entities, and a benchmark that deletes its own working set measures a shrinking one.
+
+Absolute timings on a shared runner are still not quotable. The **ratio and the crossover** are.
+
+### The complete system inventory, which is the actual pass criterion
+
+| System | Schedule | Why |
+|---|---|---|
+| `SpinSystem` | `ScheduleParallel` | |
+| `MoveBounceSystem` | `ScheduleParallel` | |
+| `MoveTowardSystem` | `ScheduleParallel` | |
+| `HealthDeathSystem` | `ScheduleParallel` + `ParallelWriter` | |
+| `TimeToLiveSystem` | `ScheduleParallel` + `ParallelWriter` | |
+| `EntityViewTransformSyncSystem` | **already parallel** | Bursted `IJobEntity` collects blittable samples; a flat main-thread loop applies them, because `UnityEngine.Transform` is main-thread-only |
+| `EntityViewSpawnSystem` | main thread | `EntityViewRegistry.Spawn` instantiates a pooled `GameObject`; Unity's object API is main-thread-only by contract, not by convention |
+| `EntityViewDespawnSystem` | main thread | same managed pool call, plus a structural removal |
+| `NetworkViewCommandSystem` | main thread | the drain is ordered by definition, and two `SetState`s for one id can share a drain where "last wins" — splitting races two workers on one component, and de-duplicating first is a serial pass over the same data |
+| `LocalPredictionSystem` | main thread, **must stay** | one predictor with an order-dependent input ring buffer; `Reconcile` replays the whole backlog in sequence. Parallelising yields a plausible wrong position rather than a crash, for nothing, since exactly one entity is predicted |
+
+Five parallel, one already parallel, four with reasons. No entry is "did not get to it".
+
+### The hybrid half, audited rather than assumed
+
+- **Zero `MonoBehaviour` in shipping code.** `grep -rln ": MonoBehaviour" Runtime*` returns nothing;
+  the only ones in the repository are in `Samples~`, which is presentation by definition.
+- **No simulation state outside ECS.** `EntityViewRegistry` is a plain `sealed class` holding an
+  id→`GameObject` map — a presentation-side lookup, not simulation state.
+- **The seam is one-directional**: entities carry `EntityViewLink` (an `int` handle, blittable,
+  readable from a job); nothing reads a `GameObject` back into simulation. The handle exists
+  precisely so the component stays unmanaged.
+
+### Unverified
+
+**The crossover numbers still come from a shared runner.** The interleaved median makes the ratio
+credible; it does not make the absolutes real, and the crossover point moves with core count. One
+filtered PlayMode run on the target machine settles it — that remains the only way to get figures
+worth acting on.
+
 ## [0.17.0] - 2026-08-15
 
 ### The core is actually multithreaded now

@@ -41,19 +41,26 @@ namespace Cuvara.DOTS.Simulation
     [UpdateAfter(typeof(MoveBounceSystem))]
     internal partial struct SpinSystem : ISystem
     {
+        private EntityQuery _query;
+
         [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
+            _query = SystemAPI.QueryBuilder().WithAllRW<Unity.Transforms.LocalTransform>().WithAll<SpinSpeed>().Build();
             state.RequireForUpdate<SpinSpeed>();
         }
 
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            state.Dependency = new SpinJob
-            {
-                DeltaTime = SystemAPI.Time.DeltaTime,
-            }.ScheduleParallel(state.Dependency);
+            // Scheduled only when there is enough work to pay for scheduling. See
+            // ParallelScheduling for the measurement — below the threshold every one of these jobs
+            // was slower scheduled than run, and this package's entity count is AOI-bounded, so the
+            // common case is below it.
+            var job = new SpinJob { DeltaTime = SystemAPI.Time.DeltaTime };
+            state.Dependency = _query.CalculateEntityCount() >= ParallelScheduling.MinimumEntities
+                ? job.ScheduleParallel(state.Dependency)
+                : job.Schedule(state.Dependency);
         }
     }
 }

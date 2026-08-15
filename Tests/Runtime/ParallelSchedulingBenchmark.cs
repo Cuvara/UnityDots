@@ -1,3 +1,4 @@
+using System;
 using System.Text;
 using Cuvara.DOTS.Simulation;
 using NUnit.Framework;
@@ -15,13 +16,13 @@ namespace Cuvara.DOTS.Tests
 {
     // The jobs are scheduled from systems rather than from the test body, and that is a hard
     // requirement rather than a style choice: IJobEntity's Run/Schedule/ScheduleParallel methods are
-    // emitted by the source generator only for call sites inside an ISystem or SystemBase. Calling
-    // them from a plain class compiles against the stub and throws at runtime with
+    // emitted by the source generator only for call sites inside an ISystem or SystemBase. Called
+    // from a plain class they compile against a stub and throw at runtime with
     // "This method should have been replaced by source gen." — which names the mechanism but not the
     // rule, so it is worth stating here.
     //
-    // Each pair schedules the SAME job struct the shipping system uses. Nothing is reimplemented for
-    // the benchmark, so what is timed is the schedule and not a lookalike.
+    // Every pair below schedules the SAME job struct the shipping system uses. Nothing is
+    // reimplemented for the benchmark, so what is timed is the schedule and not a lookalike.
 
     [DisableAutoCreation]
     internal partial struct SpinRunSystem : ISystem
@@ -32,13 +33,11 @@ namespace Cuvara.DOTS.Tests
     [DisableAutoCreation]
     internal partial struct SpinParallelSystem : ISystem
     {
-        public void OnUpdate(ref SystemState state)
-        {
-            // Completed inside the system only because a benchmark has to measure a finished unit of
-            // work. The shipping SpinSystem deliberately does NOT complete here — it threads
-            // state.Dependency out so the job overlaps with the rest of the frame.
+        // Completed inside the system only because a benchmark must measure a finished unit of work.
+        // The shipping SpinSystem deliberately does NOT complete — it threads state.Dependency out
+        // so the job overlaps the rest of the frame.
+        public void OnUpdate(ref SystemState state) =>
             new SpinJob { DeltaTime = 0.016f }.ScheduleParallel(state.Dependency).Complete();
-        }
     }
 
     [DisableAutoCreation]
@@ -50,45 +49,162 @@ namespace Cuvara.DOTS.Tests
     [DisableAutoCreation]
     internal partial struct MoveBounceParallelSystem : ISystem
     {
+        public void OnUpdate(ref SystemState state) =>
+            new MoveBounceJob { DeltaTime = 0.016f }.ScheduleParallel(state.Dependency).Complete();
+    }
+
+    [DisableAutoCreation]
+    internal partial struct MoveTowardRunSystem : ISystem
+    {
+        public void OnUpdate(ref SystemState state) => new MoveTowardJob { DeltaTime = 0.016f }.Run();
+    }
+
+    [DisableAutoCreation]
+    internal partial struct MoveTowardParallelSystem : ISystem
+    {
+        public void OnUpdate(ref SystemState state) =>
+            new MoveTowardJob { DeltaTime = 0.016f }.ScheduleParallel(state.Dependency).Complete();
+    }
+
+    // The two structural jobs need a command buffer. It is created and played back inside the
+    // measured region deliberately: recording through a ParallelWriter is part of what the parallel
+    // schedule costs, and excluding it would flatter the result.
+
+    [DisableAutoCreation]
+    internal partial struct HealthDeathRunSystem : ISystem
+    {
         public void OnUpdate(ref SystemState state)
         {
-            new MoveBounceJob { DeltaTime = 0.016f }.ScheduleParallel(state.Dependency).Complete();
+            using var buffer = new EntityCommandBuffer(Allocator.TempJob);
+            new HealthDeathJob { CommandBuffer = buffer.AsParallelWriter() }.Run();
+            buffer.Playback(state.EntityManager);
+        }
+    }
+
+    [DisableAutoCreation]
+    internal partial struct HealthDeathParallelSystem : ISystem
+    {
+        public void OnUpdate(ref SystemState state)
+        {
+            using var buffer = new EntityCommandBuffer(Allocator.TempJob);
+            new HealthDeathJob { CommandBuffer = buffer.AsParallelWriter() }
+                .ScheduleParallel(state.Dependency).Complete();
+            buffer.Playback(state.EntityManager);
+        }
+    }
+
+    [DisableAutoCreation]
+    internal partial struct TimeToLiveRunSystem : ISystem
+    {
+        public void OnUpdate(ref SystemState state)
+        {
+            using var buffer = new EntityCommandBuffer(Allocator.TempJob);
+            new TimeToLiveJob { DeltaTime = 0.016f, CommandBuffer = buffer.AsParallelWriter() }.Run();
+            buffer.Playback(state.EntityManager);
+        }
+    }
+
+    [DisableAutoCreation]
+    internal partial struct TimeToLiveParallelSystem : ISystem
+    {
+        public void OnUpdate(ref SystemState state)
+        {
+            using var buffer = new EntityCommandBuffer(Allocator.TempJob);
+            new TimeToLiveJob { DeltaTime = 0.016f, CommandBuffer = buffer.AsParallelWriter() }
+                .ScheduleParallel(state.Dependency).Complete();
+            buffer.Playback(state.EntityManager);
         }
     }
 
     /// <summary>
-    /// Measures the parallel schedule against the single-threaded one, so "this is faster" is a
-    /// number rather than an argument.
+    /// Measures each parallel schedule against its single-threaded form and reports the entity count
+    /// where parallel overtakes serial.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>The comparison is the same job scheduled two ways</b> — <c>Run()</c> versus
-    /// <c>ScheduleParallel()</c> — not a job against a hand-written loop. Both execute byte-identical
-    /// Bursted code over identical chunks, so the difference measured is exactly what the change
-    /// bought: worker parallelism, minus scheduling overhead. Comparing against a <c>foreach</c>
-    /// would fold in codegen differences and measure the wrong thing.
+    /// <b>Same job, two schedules</b> — <c>Run()</c> versus <c>ScheduleParallel()</c> — not a job
+    /// against a hand-written loop. Both execute byte-identical Bursted code over identical chunks,
+    /// so what is measured is worker parallelism minus scheduling overhead, and nothing else.
     /// </para>
     /// <para>
-    /// <b>These numbers are a shape, not a spec.</b> They come from whatever machine ran them — a
-    /// shared CI runner is capped at a handful of cores and is noisy — so the useful output is the
-    /// <i>crossover</i>: the entity count below which scheduling costs more than it saves. That point
-    /// moves with core count; that one exists does not.
+    /// <b>The two arms are interleaved and the ratio is a median, because the absolutes are noisy.</b>
+    /// An earlier revision timed thirty serial iterations and then thirty parallel ones; on a shared
+    /// cloud runner, two runs of that identical code reported 0.88 ms and 80.07 ms for the same case
+    /// — 90x apart — because a stall landing inside one arm skews only that arm. Interleaving
+    /// A/B/A/B puts any stall in both halves of the same pair, and a median discards the pairs that
+    /// were hit. The absolutes remain untrustworthy on a shared runner; the ratio survives.
     /// </para>
     /// <para>
-    /// Nothing here asserts a timing. A performance assertion on a shared runner is a flaky test, and
-    /// a flaky test inside a gate is worse than no measurement — it teaches people to re-run until
-    /// green. The timings are logged; the assertions are about correctness.
+    /// <b>Nothing here asserts a timing.</b> A performance assertion on a shared runner is a flaky
+    /// test, and a flaky test inside a gate teaches people to re-run until green. Timings are logged;
+    /// the assertions are about correctness.
     /// </para>
     /// </remarks>
     public sealed class ParallelSchedulingBenchmark
     {
         private static readonly int[] EntityCounts = { 64, 256, 1024, 4096, 16384, 65536 };
 
-        private const int Warmup = 5;
-        private const int Iterations = 30;
+        private const int Warmup = 10;
+        private const int Pairs = 41;
 
         private World _world;
         private EntityManager _entityManager;
+
+        /// <summary>
+        /// Refuses to measure anything unless Burst is actually compiling.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>A table printed under a <c>burst=False</c> line is a quotable-looking number that is
+        /// wrong, and that is the same shape as a gate reporting green over zero tests.</b> It
+        /// happened: a 12-core run produced a clean six-row table at 535 ns/entity for a
+        /// <c>RotateY</c> — the managed path — with the disabled flag one line above it, and it was
+        /// nearly read past. So this skips the test rather than printing anything.
+        /// </para>
+        /// <para>
+        /// <b>Why Burst may be off, from its own source.</b> <c>BurstCompilerOptions</c>'s static
+        /// constructor sets <c>ForceDisableBurstCompilation</c> for exactly four reasons: the
+        /// <c>--burst-disable-compilation</c> command-line argument; a non-empty
+        /// <c>UNITY_BURST_DISABLE_COMPILATION</c> environment variable; <c>ENABLE_CORECLR</c> in the
+        /// Editor; and <c>CheckIsSecondaryUnityProcess()</c>, which includes
+        /// <c>AssetDatabase.IsAssetImportWorkerProcess()</c>. Separately the Editor's
+        /// <i>Jobs &gt; Burst &gt; Enable Compilation</i> menu toggle persists across sessions, and a
+        /// batchmode run inherits whatever it was last left at — the likeliest cause when none of
+        /// the four applies, and one no command-line flag overrides.
+        /// </para>
+        /// <para>
+        /// So this <b>tries to turn it on</b> before giving up. The setter coerces back to false when
+        /// <c>ForceDisableBurstCompilation</c> is set, which is what separates "the toggle was off"
+        /// (fixed here) from "this process cannot Burst at all" (not fixable here, and the message
+        /// says which).
+        /// </para>
+        /// <para>
+        /// Synchronous compilation is requested too: Burst compiles asynchronously by default, so the
+        /// first calls run the managed path and a warmup loop would quietly measure it.
+        /// </para>
+        /// </remarks>
+        private static void RequireBurst()
+        {
+            if (!BurstCompiler.IsEnabled)
+            {
+                BurstCompiler.Options.EnableBurstCompilation = true;
+            }
+
+            if (!BurstCompiler.IsEnabled)
+            {
+                Assert.Ignore(
+                    "Burst is not compiling, so every timing here would measure the managed path — " +
+                    "535 ns/entity for a RotateY rather than ~18. No table is printed, on purpose. " +
+                    "Setting BurstCompiler.Options.EnableBurstCompilation did not take, so " +
+                    "ForceDisableBurstCompilation is set: check --burst-disable-compilation, a " +
+                    "UNITY_BURST_DISABLE_COMPILATION env var, ENABLE_CORECLR, or a secondary Unity " +
+                    "process (AssetDatabase.IsAssetImportWorkerProcess). If none apply, the Editor's " +
+                    "Jobs > Burst > Enable Compilation toggle is off and persists across sessions.");
+            }
+
+            // Async is the default, so the first calls run managed and the warmup would measure that.
+            BurstCompiler.Options.EnableBurstCompileSynchronously = true;
+        }
 
         [SetUp]
         public void SetUp()
@@ -100,17 +216,23 @@ namespace Cuvara.DOTS.Tests
         [TearDown]
         public void TearDown() => _world.Dispose();
 
+        /// <remarks>
+        /// Health and TimeToLive are seeded so that <b>nothing is destroyed</b>: the realistic steady
+        /// state is a scan over live entities, and a benchmark that deletes its own working set
+        /// measures a shrinking one.
+        /// </remarks>
         private void Populate(int count)
         {
             _entityManager.DestroyEntity(_entityManager.UniversalQuery);
 
             var archetype = _entityManager.CreateArchetype(
-                typeof(LocalTransform), typeof(SpinSpeed), typeof(MoveData));
+                typeof(LocalTransform), typeof(SpinSpeed), typeof(MoveData),
+                typeof(MoveToward), typeof(Health), typeof(TimeToLive));
 
             using var entities = _entityManager.CreateEntity(archetype, count, Allocator.Temp);
             for (var i = 0; i < entities.Length; i++)
             {
-                _entityManager.SetComponentData(entities[i], LocalTransform.FromPosition(i, 0f, 0f));
+                _entityManager.SetComponentData(entities[i], LocalTransform.FromPosition(i % 512, 0f, 0f));
                 _entityManager.SetComponentData(entities[i], new SpinSpeed { RadiansPerSecond = 1f + (i % 7) });
                 _entityManager.SetComponentData(entities[i], new MoveData
                 {
@@ -118,37 +240,29 @@ namespace Cuvara.DOTS.Tests
                     BoundsMin = new float3(-1000f, -1000f, -1000f),
                     BoundsMax = new float3(1000f, 1000f, 1000f),
                 });
+                _entityManager.SetComponentData(entities[i], new MoveToward
+                {
+                    Target = new float3(1000f, 0f, 1000f), Speed = 5f, StopDistance = 0.1f,
+                });
+                _entityManager.SetComponentData(entities[i], new Health { Current = 100, Max = 100 });
+                _entityManager.SetComponentData(entities[i], new TimeToLive { Remaining = 1e9f });
             }
         }
 
         private void Tick<T>() where T : unmanaged, ISystem =>
             _world.GetExistingSystem<T>().Update(_world.Unmanaged);
 
-        [Test]
-        public void SpinJob_ParallelVersusSingleThreaded()
-        {
-            _world.GetOrCreateSystem<SpinRunSystem>();
-            _world.GetOrCreateSystem<SpinParallelSystem>();
-
-            Report("SpinJob", count =>
-            {
-                Populate(count);
-                return (Time(Tick<SpinRunSystem>), Time(Tick<SpinParallelSystem>));
-            });
-        }
-
-        [Test]
-        public void MoveBounceJob_ParallelVersusSingleThreaded()
-        {
-            _world.GetOrCreateSystem<MoveBounceRunSystem>();
-            _world.GetOrCreateSystem<MoveBounceParallelSystem>();
-
-            Report("MoveBounceJob", count =>
-            {
-                Populate(count);
-                return (Time(Tick<MoveBounceRunSystem>), Time(Tick<MoveBounceParallelSystem>));
-            });
-        }
+        [Test] public void Spin() => Measure<SpinRunSystem, SpinParallelSystem>("SpinJob");
+        [Test] public void MoveBounce() => Measure<MoveBounceRunSystem, MoveBounceParallelSystem>("MoveBounceJob");
+        // MoveToward's 65,536 row is NOT credible and must not be quoted: its ns/entity sits at
+        // ~585 for three consecutive sizes and then reports 10.1, a 58x drop that no scheduling
+        // effect produces. Something about that row measures a different amount of work than the
+        // others. The row is left in rather than deleted, because a visibly broken measurement is
+        // more useful than a missing one — but the job is scheduled by the shared threshold, not by
+        // this number.
+        [Test] public void MoveToward() => Measure<MoveTowardRunSystem, MoveTowardParallelSystem>("MoveTowardJob");
+        [Test] public void HealthDeath() => Measure<HealthDeathRunSystem, HealthDeathParallelSystem>("HealthDeathJob");
+        [Test] public void TimeToLive() => Measure<TimeToLiveRunSystem, TimeToLiveParallelSystem>("TimeToLiveJob");
 
         /// <summary>
         /// The determinism check the parallel schedule has to earn: identical input through both
@@ -156,15 +270,21 @@ namespace Cuvara.DOTS.Tests
         /// </summary>
         /// <remarks>
         /// Not a formality. A parallel job whose result depends on iteration order is a bug that
-        /// reproduces roughly one run in ten, and these systems produce positions a predictor may
-        /// later reconcile against. Bit-identical rather than approximately equal, because "close
-        /// enough" is how a drift bug survives its own test.
+        /// reproduces about one run in ten, and these systems produce positions a predictor may later
+        /// reconcile against. Bit-identical rather than approximately equal, because "close enough"
+        /// is how a drift bug survives its own test.
+        /// </para>
+        /// <para>
+        /// <b>Deliberately not guarded on Burst.</b> Determinism is a property of the schedule, not
+        /// of the compiler — so this is exactly the assertion still worth running when Burst is off,
+        /// and it is the one that ran and passed on the 12-core machine where every timing was
+        /// invalid.
+        /// </para>
         /// </remarks>
         [Test]
         public void BothSchedules_ProduceBitIdenticalResults()
         {
             const int count = 4096;
-
             _world.GetOrCreateSystem<MoveBounceRunSystem>();
             _world.GetOrCreateSystem<MoveBounceParallelSystem>();
 
@@ -195,58 +315,66 @@ namespace Cuvara.DOTS.Tests
             }
         }
 
-        private static double Time(System.Action action)
+        private void Measure<TRun, TParallel>(string name)
+            where TRun : unmanaged, ISystem
+            where TParallel : unmanaged, ISystem
         {
-            for (var i = 0; i < Warmup; i++) action();
+            // Before anything is populated or timed: no Burst, no table.
+            RequireBurst();
 
-            var clock = Stopwatch.StartNew();
-            for (var i = 0; i < Iterations; i++) action();
-            clock.Stop();
+            _world.GetOrCreateSystem<TRun>();
+            _world.GetOrCreateSystem<TParallel>();
 
-            return clock.Elapsed.TotalMilliseconds / Iterations;
-        }
-
-        private static void Report(string name, System.Func<int, (double Single, double Parallel)> measure)
-        {
             var report = new StringBuilder();
-            report.AppendLine($"[benchmark] {name} — ms per invocation, {Iterations} iterations after {Warmup} warmup");
-            report.AppendLine($"[benchmark] processors reported by the runtime: {SystemInfo.processorCount}");
-            // Burst has no public per-job "was this compiled" query, so the global flag plus the
-            // per-entity cost is the best evidence available. It matters: with Burst off, this
-            // measures IL against IL and the ratio is still meaningful, but the absolute numbers
-            // are ~100x the shipping ones and must not be quoted as such.
-            report.AppendLine($"[benchmark] BurstCompiler.IsEnabled: {BurstCompiler.IsEnabled}");
-            report.AppendLine($"[benchmark] (no public API reports per-job compilation; ns/entity below is the cross-check)");
-            // Read this before believing any row. This workflow runs three Unity containers at once,
-            // each requesting 4 CPUs from one host, so a benchmark here measures contention as much
-            // as parallelism. Two runs of this identical code produced 0.88 ms and 80.07 ms for the
-            // same 65536-entity case — 90x apart. Trust the ns/entity column as a sanity check and
-            // the crossover as a shape; do not quote a speedup from CI. Run it on real hardware.
-            report.AppendLine("[benchmark] WARNING: CI runs three Unity jobs concurrently on one host —");
-            report.AppendLine("[benchmark] these timings include contention. Numbers from CI are not quotable.");
-            report.AppendLine("[benchmark]   entities |   Run() |  Parallel |  speedup");
+            report.AppendLine($"[benchmark] {name} — median of {Pairs} interleaved pairs after {Warmup} warmup");
+            report.AppendLine($"[benchmark] processors={SystemInfo.processorCount}  burst={BurstCompiler.IsEnabled}");
+            report.AppendLine("[benchmark]   entities |  serial ms | parallel ms | speedup | ns/entity serial");
 
             var crossover = -1;
             foreach (var count in EntityCounts)
             {
-                var (single, parallel) = measure(count);
-                var speedup = parallel > 0d ? single / parallel : 0d;
+                Populate(count);
+
+                for (var i = 0; i < Warmup; i++) { Tick<TRun>(); Tick<TParallel>(); }
+
+                var serial = new double[Pairs];
+                var parallel = new double[Pairs];
+                for (var i = 0; i < Pairs; i++)
+                {
+                    // Interleaved: a stall lands in both arms of the pair rather than in one column.
+                    serial[i] = Once(Tick<TRun>);
+                    parallel[i] = Once(Tick<TParallel>);
+                }
+
+                var s = Median(serial);
+                var p = Median(parallel);
+                var speedup = p > 0d ? s / p : 0d;
                 if (crossover < 0 && speedup > 1d) crossover = count;
 
-                // ns per entity makes a Burst fallback visible: a trivial job that costs ~1us per
-                // entity is not running compiled code, whatever the attribute says.
-                var singleNs = single * 1_000_000d / count;
-                var parallelNs = parallel * 1_000_000d / count;
                 report.AppendLine(
-                    $"[benchmark] {count,10} | {single,7:F4} | {parallel,9:F4} | {speedup,7:F2}x" +
-                    $"   ({singleNs,7:F1} / {parallelNs,7:F1} ns per entity)");
+                    $"[benchmark] {count,10} | {s,9:F4} | {p,11:F4} | {speedup,6:F2}x | {s * 1_000_000d / count,8:F1}");
             }
 
             report.AppendLine(crossover < 0
-                ? "[benchmark] crossover: NONE — the parallel schedule never won at these counts on this machine"
-                : $"[benchmark] crossover: parallel first wins at {crossover} entities on this machine");
+                ? $"[benchmark] {name} crossover: NONE at these counts on this machine"
+                : $"[benchmark] {name} crossover: parallel first wins at {crossover} entities");
 
             Debug.Log(report.ToString());
+        }
+
+        private static double Once(Action action)
+        {
+            var clock = Stopwatch.StartNew();
+            action();
+            clock.Stop();
+            return clock.Elapsed.TotalMilliseconds;
+        }
+
+        private static double Median(double[] values)
+        {
+            var copy = (double[])values.Clone();
+            Array.Sort(copy);
+            return copy[copy.Length / 2];
         }
     }
 }
