@@ -1,0 +1,9 @@
+# Files this client adds on top of the upstream package. A file listed here may
+# exist ONLY in the vendored copy; it may not DIFFER from an upstream file of the
+# same path, or a real drift could hide behind the exemption.
+#
+# Empty since the package was first covered by the drift check (2026-08-20). The
+# vendored copy is byte-identical to its upstream release, and getting there needed
+# an upstream fix: two folder .meta files had been repaired here and never pushed
+# back, so the copy silently differed from its own tag for as long as it existed.
+# Keep this file — an empty allowlist is a statement, and the drift check reads it.

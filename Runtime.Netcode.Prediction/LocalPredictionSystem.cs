@@ -144,6 +144,19 @@ namespace Cuvara.DOTS.Netcode.Prediction
                         // 15 Hz tick that is a handful of short-lived strings a second. Interning
                         // it is a change to make when a profiler says so, not before.
                         var wireId = entityManager.GetComponentData<NetworkEntity>(entity).Id.ToString();
+                        // Seed FIRST, and only once — netcode's SeedBaseTick is idempotent.
+                        //
+                        // Without it the predictor's _baseTick starts at zero while the server's
+                        // world tick is wherever that server happens to be, so the two counters
+                        // never share an epoch and every held-movement decision is made against a
+                        // phase that is wrong by a constant. netcode v0.16.0 added it and wired its
+                        // own WorldViewBinder; its CHANGELOG says outright that a consumer binding
+                        // views itself -- which is exactly what this system does -- "must call it,
+                        // or the feature is inert and you keep the defect". This system was that
+                        // consumer and was not calling it, so the #13 fix did nothing on the DOTS
+                        // path: the only path the DOTS sample actually runs.
+                        predictor.SeedBaseTick(reference.World.Tick);
+
                         if (reference.World.TryGet(wireId, out var snapshot))
                         {
                             predictor.SetServerSpeed(snapshot.Speed);

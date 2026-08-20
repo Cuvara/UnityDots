@@ -10,6 +10,7 @@ using Cuvara.Netcode.World;
 using NUnit.Framework;
 using Shared.GameLogic.Components;
 using Unity.Collections;
+using Unity.Core;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Transforms;
@@ -84,7 +85,20 @@ namespace Cuvara.DOTS.Tests.Prediction
                 ? new PredictionSettings(15, 5f, new MapBounds(0f, 0f, 1000f, 1000f))
                 : default);
 
-        private void Tick() => _world.GetExistingSystemManaged<NetcodeSystemGroup>().Update();
+        private double _elapsed;
+
+        /// <summary>
+        /// One frame. <paramref name="deltaTime"/> is pushed into the world's time because a bare
+        /// <c>World</c> has no player loop driving it — <c>SystemAPI.Time.DeltaTime</c> would
+        /// otherwise be zero, and <c>LocalMovePredictor.Advance(0)</c> early-returns, so every
+        /// frame-rate test would silently assert nothing.
+        /// </summary>
+        private void Tick(float deltaTime = 0f)
+        {
+            _elapsed += deltaTime;
+            _world.SetTime(new TimeData(_elapsed, deltaTime));
+            _world.GetExistingSystemManaged<NetcodeSystemGroup>().Update();
+        }
 
         private Entity Local()
         {
@@ -112,7 +126,7 @@ namespace Cuvara.DOTS.Tests.Prediction
             DotsPredictionBootstrap.Install(_world, predictor, _worldState);
 
             SpawnLocal();
-            Tick();
+            Tick(0.016f);
 
             Assert.IsTrue(predictor.IsEnabled, "guard: the settings used here must produce a usable predictor");
             Assert.IsTrue(_entityManager.HasComponent<PredictedTransform>(Local()),
@@ -129,7 +143,7 @@ namespace Cuvara.DOTS.Tests.Prediction
             DotsPredictionBootstrap.Install(_world, predictor, _worldState);
 
             SpawnLocal(3f, 7f);
-            Tick();
+            Tick(0.016f);
 
             Assert.IsFalse(predictor.IsEnabled, "guard: these settings must produce a disabled predictor");
             Assert.IsFalse(_entityManager.HasComponent<PredictedTransform>(Local()));
@@ -143,7 +157,7 @@ namespace Cuvara.DOTS.Tests.Prediction
             DotsPredictionBootstrap.Install(_world, Predictor(enabled: false), _worldState);
 
             SpawnLocal(3f, 7f);
-            Tick();
+            Tick(0.016f);
 
             Assert.AreEqual(new float3(3f, 0f, 7f),
                 _entityManager.GetComponentData<LocalTransform>(Local()).Position);
@@ -158,20 +172,20 @@ namespace Cuvara.DOTS.Tests.Prediction
             DotsPredictionBootstrap.Install(_world, predictor, _worldState);
 
             SpawnLocal();
-            Tick();
+            Tick(0.016f);
             var entity = Local();
             Assert.IsTrue(_entityManager.HasComponent<PredictedTransform>(entity), "guard: claimed first");
 
             // Swap in a disabled predictor, as a session that turned prediction off would.
             DotsPredictionBootstrap.Install(_world, Predictor(enabled: false), _worldState);
-            Tick();
+            Tick(0.016f);
 
             Assert.IsFalse(_entityManager.HasComponent<PredictedTransform>(entity), "released");
 
             // And the adapter is writing again, which is what "released" has to mean.
             var view = (IEntityView)_view;
             view.SetState("uuid-me", 4f, 5f, 100, 100);
-            Tick();
+            Tick(0.016f);
             Assert.AreEqual(new float3(4f, 0f, 5f),
                 _entityManager.GetComponentData<LocalTransform>(entity).Position);
         }
@@ -181,7 +195,7 @@ namespace Cuvara.DOTS.Tests.Prediction
         {
             DotsPredictionBootstrap.Install(_world, Predictor(), _worldState);
             SpawnLocal();
-            Tick();
+            Tick(0.016f);
             var entity = Local();
             Assert.IsTrue(_entityManager.HasComponent<PredictedTransform>(entity), "guard: claimed");
 
@@ -199,7 +213,7 @@ namespace Cuvara.DOTS.Tests.Prediction
             var view = (IEntityView)_view;
             view.Spawn("uuid-other", isLocal: false, type: PlayerType);
             view.SetState("uuid-other", 9f, 9f, 100, 100);
-            Tick();
+            Tick(0.016f);
 
             using var query = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<PredictedTransform>());
             Assert.AreEqual(0, query.CalculateEntityCount(), "nobody predicts other players");
@@ -222,7 +236,7 @@ namespace Cuvara.DOTS.Tests.Prediction
             var view = (IEntityView)shifted;
             view.Spawn("uuid-me", isLocal: true, type: PlayerType);
             view.SetState("uuid-me", 0f, 0f, 100, 100);
-            Tick();
+            Tick(0.016f);
 
             var position = _entityManager.GetComponentData<LocalTransform>(Local()).Position;
             Assert.AreEqual(mapping.ToWorld(0f, 0f).z, position.z, 1e-4f,
@@ -239,7 +253,7 @@ namespace Cuvara.DOTS.Tests.Prediction
             DotsPredictionBootstrap.Install(_world, Predictor(), _worldState);
 
             SpawnLocal(12.5f, -3.25f);
-            Tick();
+            Tick(0.016f);
 
             var anchor = _entityManager.GetComponentData<ReconciliationAnchor>(Local());
             Assert.AreEqual(new float2(12.5f, -3.25f), anchor.ServerPosition,
@@ -258,7 +272,7 @@ namespace Cuvara.DOTS.Tests.Prediction
             DotsPredictionBootstrap.Install(_world, Predictor(), _worldState);
 
             SpawnLocal(8.25f, -1.5f);
-            Tick();
+            Tick(0.016f);
 
             var anchor = _entityManager.GetComponentData<ReconciliationAnchor>(Local());
             Assert.AreEqual(new float3(8.25f, 0f, -1.5f), anchor.Position);
@@ -290,7 +304,7 @@ namespace Cuvara.DOTS.Tests.Prediction
 
             SpawnLocal();
             ApplyServerSnapshot("uuid-me", 0f, 0f, speed: 7.5f, tick: 1);
-            Tick();
+            Tick(0.016f);
 
             Assert.AreEqual(7.5f, predictor.EffectiveSpeed, 1e-4f,
                 "the wire value must win over the value the predictor was constructed with");
@@ -306,10 +320,89 @@ namespace Cuvara.DOTS.Tests.Prediction
 
             SpawnLocal();
             ApplyServerSnapshot("uuid-me", 0f, 0f, speed: 0f, tick: 1);
-            Tick();
+            Tick(0.016f);
 
             Assert.AreEqual(5f, predictor.EffectiveSpeed, 1e-4f,
                 "a non-positive wire speed must leave the constructed fallback in place");
+        }
+
+        [Test]
+        public void PredictedTransform_IsRewrittenEveryFrame_EvenWithNoSnapshot()
+        {
+            // The defect this guards is one layer along from "did we advance": a predictor that
+            // advances every frame is still invisible if the transform is only written when a
+            // snapshot arrives. Proven by clobbering the transform and running a frame in which NO
+            // snapshot is delivered — if the write is snapshot-driven, the sentinel survives.
+            DotsPredictionBootstrap.Install(_world, Predictor(), _worldState);
+            SpawnLocal();
+            Tick(0.016f);
+
+            var entity = Local();
+            var sentinel = new float3(-999f, -999f, -999f);
+            var clobbered = _entityManager.GetComponentData<LocalTransform>(entity);
+            clobbered.Position = sentinel;
+            _entityManager.SetComponentData(entity, clobbered);
+
+            Tick(0.016f); // no snapshot, no SetState, no ack — just a frame
+
+            Assert.AreNotEqual(sentinel, _entityManager.GetComponentData<LocalTransform>(entity).Position,
+                "the driver must rewrite LocalTransform every frame, not only when a snapshot lands");
+        }
+
+        [Test]
+        public void PredictedPosition_AdvancesBetweenSnapshots()
+        {
+            // The 15 Hz-render defect itself. Held input, many frames, and deliberately NOT one
+            // snapshot: if Advance were driven by the snapshot drain, the position would be frozen
+            // for the whole interval and only jump when a snapshot arrived. Every existing test in
+            // this file drives the system by delivering state, so none of them could ever have
+            // caught this — the frame loop was not modelled at all until Tick took a deltaTime.
+            var predictor = Predictor();
+            DotsPredictionBootstrap.Install(_world, predictor, _worldState);
+            SpawnLocal();
+
+            // One snapshot first, and this is a correction to the first version of this test rather
+            // than a weakening of it. Advancing from a cold start moves nothing: the predictor has
+            // no baseline to extrapolate from until a reconcile has happened, so the original
+            // version asserted behaviour the predictor does not have and failed for that reason
+            // rather than for the defect it targets. Runtime always has a snapshot first — the
+            // entity only exists because one arrived — so a baseline is the honest precondition.
+            ApplyServerSnapshot("uuid-me", 0f, 0f, speed: 5f, tick: 1);
+            Tick(0.016f);
+
+            var entity = Local();
+            predictor.RecordInput(2, 1f, 0f);
+
+            // From here: frames only. No snapshot, no ack, nothing for the drain to apply.
+            var start = _entityManager.GetComponentData<LocalTransform>(entity).Position;
+            for (var frame = 0; frame < 30; frame++) Tick(0.016f);
+            var end = _entityManager.GetComponentData<LocalTransform>(entity).Position;
+
+            Assert.AreNotEqual(start, end,
+                "with input held and no snapshot delivered, the predicted position must still move — " +
+                "otherwise the avatar renders at the snapshot rate however fast the client draws");
+        }
+
+        [Test]
+        public void ZeroDeltaTime_DoesNotAdvance_SoTheTestsAboveMeasureSomething()
+        {
+            // Guards the harness rather than the driver. Advance(0) early-returns, so if a future
+            // change dropped the SetTime call the two tests above would pass vacuously on a frozen
+            // clock. This fails if deltaTime ever stops reaching the predictor.
+            var predictor = Predictor();
+            DotsPredictionBootstrap.Install(_world, predictor, _worldState);
+            SpawnLocal();
+            Tick(0.016f);
+
+            ApplyServerSnapshot("uuid-me", 0f, 0f, speed: 5f, tick: 1);
+            Tick(0.016f);
+
+            predictor.RecordInput(2, 1f, 0f);
+            var before = predictor.Position;
+            for (var frame = 0; frame < 30; frame++) Tick(0f);
+
+            Assert.AreEqual(before.X, predictor.Position.X, 1e-6f, "a zero-length frame must not advance");
+            Assert.AreEqual(before.Y, predictor.Position.Y, 1e-6f);
         }
 
         [Test]
@@ -318,7 +411,7 @@ namespace Cuvara.DOTS.Tests.Prediction
             // The package must behave exactly as it did before this assembly existed when nothing
             // installs a predictor — which is every project that has not opted in.
             SpawnLocal(2f, 6f);
-            Tick();
+            Tick(0.016f);
 
             Assert.AreEqual(new float3(2f, 0f, 6f),
                 _entityManager.GetComponentData<LocalTransform>(Local()).Position);

@@ -5,6 +5,120 @@ All notable changes to the Cuvara DOTS package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.1] - 2026-08-20
+
+### Fixed
+- **Two folder `.meta` files were truncated and had been repaired only in the client's vendored
+  copy.** `Runtime.Netcode.Prediction.meta` and `Tests/Editor.Prediction.meta` carried a `guid` and
+  then stopped — no trailing newline, no `folderAsset: yes`, no `DefaultImporter` block — which is
+  the shape of a meta written by hand, not one Unity generated. Every sibling folder meta in the
+  package has the full body.
+
+  Unity tolerates this: it fills the missing fields in on import, which is why nothing ever failed
+  and why the defect survived to be noticed only when the two copies were compared byte for byte.
+  The repaired versions have been sitting in `IndieRPGMMOAdventure`'s vendored copy — same GUIDs,
+  full body — since the package was first vendored, and never came back upstream.
+
+  The GUIDs are unchanged, so no asset reference moves. What this buys is not a behaviour fix but a
+  comparison that means something: with these repaired, upstream and the vendored copy are
+  byte-identical, and the client's drift check can assert plain equality instead of carrying an
+  allowlist entry for a difference nobody could explain.
+
+## [0.23.0] - 2026-08-20
+
+### Fixed
+- **`LocalPredictionSystem` never called `SeedBaseTick`, so netcode's #13 fix was inert on the DOTS
+  path — the only path the DOTS sample actually runs.** netcode v0.16.0 added
+  `LocalMovePredictor.SeedBaseTick(long serverTick)` to align the predictor's local tick counter
+  with the server's world tick, and wired its own `WorldViewBinder`. Its CHANGELOG states plainly
+  that a consumer binding views itself — a DOTS system reading `LocalMovePredictor.Position` into
+  `LocalTransform`, which is precisely this system — **must call it, or the feature is inert and
+  you keep the defect**. This system was that consumer and was not calling it.
+  Without the seed, `_baseTick` starts at zero while the server's tick is wherever that server
+  happens to be, so the two counters never share an epoch and every held-movement decision is made
+  against a phase that is wrong by a constant. Seeded first and only once per reconcile;
+  `SeedBaseTick` is idempotent by contract.
+
+### Changed
+- **CI's netcode pin moves `v0.15.1` → `v0.16.1`.** It had to: `SeedBaseTick` does not exist before
+  v0.16.0, so the fix above would not compile against the old pin. This is the coupling the CI
+  header already warns about — the pin and what depends on it move together.
+
+## [0.22.0] - 2026-08-15
+
+### The 15 Hz-render defect: the DOTS path was already correct, and now proves it
+
+netcode's `WorldViewBinder` advanced prediction and updated the view **inside the snapshot loop**, so
+the avatar moved only when a snapshot arrived — at the world rate, however fast the client drew. Five
+releases of render smoothing were computed and discarded.
+
+**`LocalPredictionSystem` never had that shape.** It lives in `PredictionSystemGroup` →
+`NetcodeSystemGroup` → `InitializationSystemGroup`, so it runs **every frame**, and both
+`predictor.Advance(SystemAPI.Time.DeltaTime)` and the `LocalTransform`/`LocalToWorld` writes sit
+**outside** the `if (ackTick > _lastAckTick)` block that gates reconciliation.
+
+That was true by construction and untested, which is not the same as verified. Three tests now cover
+it:
+
+- **`PredictedTransform_IsRewrittenEveryFrame_EvenWithNoSnapshot`** — clobbers the transform with a
+  sentinel, runs one frame delivering **no** snapshot, asserts the sentinel is gone. This is the
+  defect one layer along: advancing every frame is still invisible if the *write* is snapshot-driven.
+- **`PredictedPosition_AdvancesBetweenSnapshots`** — one snapshot to establish a baseline, then held
+  input and 30 frames with **no further snapshot**, asserting the position moved.
+
+  The first version of this test delivered no snapshot at all and **failed**: advancing from a cold
+  start moves nothing, because the predictor has no baseline to extrapolate from until a reconcile
+  has happened. That was the test asserting behaviour the predictor does not have, not a defect —
+  and the fixture was corrected rather than the assertion weakened, because runtime always has a
+  snapshot first: the entity only exists because one arrived.
+- **`ZeroDeltaTime_DoesNotAdvance_SoTheTestsAboveMeasureSomething`** — guards the harness. `Advance(0)`
+  early-returns, so a future change dropping the clock would make the other two pass vacuously.
+
+### The frame loop is now modelled, which is why these tests can exist
+
+`Tick` takes a `deltaTime` and pushes it into the world via `SetTime`. **A bare `World` has no player
+loop**, so `SystemAPI.Time.DeltaTime` is zero and `Advance(0)` early-returns — every frame-rate
+assertion would have been vacuous.
+
+That is the same root cause as netcode's blind spot: its `WorldViewBinderTests` drove the binder
+entirely by feeding snapshots, so a position that moved *only* on snapshots was indistinguishable from
+a correct one. **The fixture could not express the failure** — the same shape as a CI gate that cannot
+go red, and as a smoothing fixture using one constant for two rates. Every existing test in this file
+drove the system by delivering state; none could have caught this before `Tick` took a time step.
+
+### Changed
+
+- CI installs `com.cuvara.netcode` **v0.15.1**, and the three `versionDefines` minimums move to 0.15.0
+  (the version whose API they need; 0.15.1 is a packaging fix and adds no API).
+
+  **0.15.0 could not be used**: it shipped `Tests/Editor/HeldMovementParityTests.cs` with no `.meta`,
+  Unity logged an Error, and the test framework turned it into an `UnhandledLogMessageException` that
+  failed the whole run — with **137/137 EditMode and 29/29 PlayMode passing and not one failing
+  test**. Two defects stacked: the parity test never ran anywhere, and the Error failed every
+  consumer's suite. Fixed upstream in 0.15.1, and the meta gate this package already runs is now
+  ported to netcode so it cannot recur silently.
+  The adapter and its tests stay at `0.4.0`: they call nothing newer.
+- CI's `com.rpgmmo.shared-gamelogic` pin moves to **`sgl-v0.1.8`**. netcode 0.15.0 does not compile
+  against 0.1.7 — `GameConstants.MaxBankedMovementTicks` does not exist there — which is the **second
+  time** a netcode bump has silently required an sgl bump, and the second time the failure surfaced as
+  a `CS0117` inside *netcode's own source* rather than in this package. The CI header already says the
+  pins are part of the configuration under test and must move together; this is what it looks like
+  when they do not.
+
+  Incidentally this is direct evidence the multi-rate work is real and landed in the shared library:
+  `MaxBankedMovementTicks` is a 60 Hz-input concept that did not exist at 0.1.7.
+
+### Unverified
+
+**Whether the user's stutter is gone is a measurement, not a claim made here.** Burstiness that reads
+the same with prediction on and off is not measuring prediction; after the fix, prediction-on should
+fall well below prediction-off. These tests prove the DOTS path advances and writes per frame. They do
+not prove the frame *looks* smooth, and this package still has no path that has run against a live
+server.
+
+The tick-rate divergence reported in 0.21.0 is untouched and still upstream: netcode v0.15.0's
+`JoinTokenResponse` carries no `TickRate` and `LocalMovePredictor` has no setter for it.
+
 ## [0.21.0] - 2026-08-15
 
 ### Per-system thresholds, from real numbers
