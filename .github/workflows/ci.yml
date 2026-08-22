@@ -34,6 +34,29 @@ name: CI
 # missing feature but a hard compile failure inside com.cuvara.netcode's own
 # WorldState.cs — netcode 0.9.1 does not build against 0.1.6 at all. Bump these
 # alongside the netcode pin whenever either moves.
+#
+# It bit a SECOND time, the same way, on 2026-08-22: the netcode pin moved
+# 0.16.1 -> 0.19.0 and the shared-gamelogic pin stayed at sgl-v0.1.8. netcode's
+# Runtime/Content/ arrived after 0.16.1 and needs Shared.GameLogic.Content, which
+# arrived in sgl-v0.2.0 — so the row failed inside com.cuvara.netcode again, this
+# time in ContentClient.cs and ContentJsonReader.cs:
+#
+#   error CS0234: The type or namespace name 'Content' does not exist in the
+#                 namespace 'Shared.GameLogic'
+#
+# The job is named "netcode present" and NOT for the version it pins, because
+# branch protection requires checks BY NAME. It required "Unity Tests (netcode
+# 0.16.1)" until this commit, so bumping the pin renamed the job, the required
+# check never appeared, and main became unmergeable by anything -- a stricter
+# gate than intended and one that no PR could ever satisfy. A version-free name
+# means the next pin bump touches this file only.
+#
+# Both times the error was raised by netcode's own source, several files away
+# from the line that actually needed changing. Reading the failing FILE tells you
+# nothing; reading the PINS does. Note also that sgl-v0.2.0 shipped the Content
+# sources without .meta files, so Unity did not import them — sgl-v0.2.2 is the
+# first tag where that directory actually exists as far as the Editor is
+# concerned. A version number that merely contains a feature is not enough.
 
 on:
   push:
@@ -131,7 +154,7 @@ jobs:
               "com.unity.burst": "1.8.30",
               "com.unity.collections": "2.6.8",
               "com.unity.mathematics": "1.3.2",
-              "com.rpgmmo.shared-gamelogic": "https://github.com/Cuvara/rpg-mmo-server.git?path=/backend/gameserver-dotnet/Shared.GameLogic#sgl-v0.1.8"
+              "com.rpgmmo.shared-gamelogic": "https://github.com/Cuvara/rpg-mmo-server.git?path=/backend/gameserver-dotnet/Shared.GameLogic#sgl-v0.2.2"
             },
             "testables": ["com.cuvara.dots"]
           }
@@ -214,7 +237,7 @@ jobs:
   # commit hash", which is the row doing its job.
   # ---------------------------------------------------------------------------
   test-with-netcode:
-    name: Unity Tests (netcode 0.16.1)
+    name: Unity Tests (netcode present)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -257,12 +280,12 @@ jobs:
           {
             "dependencies": {
               "com.cuvara.dots": "file:../package",
-              "com.cuvara.netcode": "https://github.com/Cuvara/Netcode.git#v0.16.1",
+              "com.cuvara.netcode": "https://github.com/Cuvara/Netcode.git#v0.19.0",
               "com.unity.entities": "1.4.8",
               "com.unity.burst": "1.8.30",
               "com.unity.collections": "2.6.8",
               "com.unity.mathematics": "1.3.2",
-              "com.rpgmmo.shared-gamelogic": "https://github.com/Cuvara/rpg-mmo-server.git?path=/backend/gameserver-dotnet/Shared.GameLogic#sgl-v0.1.8"
+              "com.rpgmmo.shared-gamelogic": "https://github.com/Cuvara/rpg-mmo-server.git?path=/backend/gameserver-dotnet/Shared.GameLogic#sgl-v0.2.2"
             },
             "scopedRegistries": [
               {
@@ -302,7 +325,7 @@ jobs:
           unityVersion: 6000.3.9f1
           testMode: all
           githubToken: ${{ secrets.GITHUB_TOKEN }}
-          checkName: Test Results (netcode 0.16.1)
+          checkName: Test Results (netcode present)
           artifactsPath: artifacts
 
       - name: Samples must compile

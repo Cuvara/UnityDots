@@ -188,6 +188,57 @@ namespace Cuvara.DOTS.Netcode
 
         public void SetState(string id, float x, float y, int hp, int maxHp)
         {
+            SetStateAtTick(id, x, y, hp, maxHp, tick: 0L, receiveTimeSeconds: 0.0);
+        }
+
+        /// <summary>
+        /// Latest authoritative state for an already-spawned id, <b>with the server tick it was
+        /// true on</b> — so the mirror can be rendered by ECS interpolation instead of being
+        /// teleported to each state as it lands.
+        /// </summary>
+        /// <param name="id">The replicated id, already spawned.</param>
+        /// <param name="x">Server-space x, verbatim off the wire.</param>
+        /// <param name="y">Server-space y, verbatim off the wire.</param>
+        /// <param name="hp">Current hp. Never interpolated — a half-applied hit is not a state.</param>
+        /// <param name="maxHp">Maximum hp.</param>
+        /// <param name="tick">
+        /// The server tick this state was true on, strictly increasing per id. Non-positive falls
+        /// back to <see cref="SetState"/>'s behaviour exactly.
+        /// </param>
+        /// <param name="receiveTimeSeconds">
+        /// Seconds on the caller's own monotonic clock when this state was received. Only the
+        /// differences between successive values matter, so any epoch will do — but it must be the
+        /// same clock every call, and it must be real time rather than a frame count.
+        /// </param>
+        /// <remarks>
+        /// <para>
+        /// <b>Not part of <c>IEntityView</c>, and it cannot be.</b> That interface is netcode's, it
+        /// carries five arguments and no tick, and widening it would make every GameObject view in
+        /// every consumer implement a method it has no use for. This is the DOTS adapter's own
+        /// entry point, for a caller that has the tick in its hand — a snapshot handler reading
+        /// <c>WorldState.Tick</c> — and is willing to say so.
+        /// </para>
+        /// <para>
+        /// <b>Choosing between the two methods chooses which layer smooths the motion, and choosing
+        /// both would smooth it twice.</b> <c>WorldViewBinder.Tick</c> evaluates its own
+        /// interpolation and hands the result to <see cref="SetState"/>, so a view driven by the
+        /// binder is already receiving a rendered position: buffering those and interpolating again
+        /// would stack a second render delay on top of the first and make remote entities lag by
+        /// twice <c>InterpolationConfig.TargetDelay</c>, smoothly and without any error to notice.
+        /// The two paths are therefore mutually exclusive per entity, and the drain enforces it
+        /// rather than trusting it — a state with a tick is buffered and the transform is left to
+        /// <see cref="RemoteInterpolationSystem"/>; a state without one is written straight to the
+        /// transform and the entity's sample buffer stays empty, so the job passes over it.
+        /// </para>
+        /// <para>
+        /// The intended shape for a DOTS consumer that wants ECS-side interpolation is therefore:
+        /// keep using <c>WorldViewBinder</c> for spawn/despawn reconciliation, and feed positions
+        /// through this from the snapshot handler that already knows the tick. A consumer that does
+        /// not care keeps calling nothing and gets 0.23.1's behaviour unchanged.
+        /// </para>
+        /// </remarks>
+        public void SetStateAtTick(string id, float x, float y, int hp, int maxHp, long tick, double receiveTimeSeconds)
+        {
             if (string.IsNullOrEmpty(id)) return;
 
             // A state for an id that was never spawned is dropped rather than spawning one. Spawn
@@ -207,6 +258,8 @@ namespace Cuvara.DOTS.Netcode
                 Y = y,
                 Hp = hp,
                 MaxHp = maxHp,
+                Tick = tick > 0L ? tick : 0L,
+                ReceiveTime = receiveTimeSeconds,
             });
         }
 

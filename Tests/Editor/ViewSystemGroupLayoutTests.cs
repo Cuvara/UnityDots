@@ -54,6 +54,7 @@ namespace Cuvara.DOTS.Tests.Editor
             typeof(MovementSystemGroup),
             typeof(LifecycleSystemGroup),
             typeof(ViewSystemGroup),
+            typeof(ViewInterpolationGroup),
             typeof(ViewLifecycleGroup),
             typeof(ViewTransformSyncGroup),
             typeof(DotsEndSimulationCommandBufferSystem),
@@ -105,12 +106,21 @@ namespace Cuvara.DOTS.Tests.Editor
         }
 
         [Test]
-        public void ViewSubGroups_NestUnderTheViewGroup_LifecycleThenSync()
+        public void ViewSubGroups_NestUnderTheViewGroup_InterpolationThenLifecycleThenSync()
         {
             // Nested rather than flat so a consumer can inject between "views exist" and "views are
             // positioned" without naming a package system.
+            Assert.AreEqual(typeof(ViewSystemGroup), GroupOf(typeof(ViewInterpolationGroup)));
             Assert.AreEqual(typeof(ViewSystemGroup), GroupOf(typeof(ViewLifecycleGroup)));
             Assert.AreEqual(typeof(ViewSystemGroup), GroupOf(typeof(ViewTransformSyncGroup)));
+
+            // Interpolation first, because both of the other two READ the transform: the lifecycle
+            // group places a new view from LocalToWorld and the sync group copies it onto every live
+            // GameObject. Ordered later it would show this frame's views at last frame's rendered
+            // position — one constant frame of lag on every remote entity, read as softness rather
+            // than as an ordering fault. Empty without com.cuvara.netcode, and declared here anyway
+            // so the position is fixed before anyone orders against it.
+            CollectionAssert.Contains(UpdateBeforeOf(typeof(ViewInterpolationGroup)), typeof(ViewLifecycleGroup));
             CollectionAssert.Contains(UpdateAfterOf(typeof(ViewTransformSyncGroup)), typeof(ViewLifecycleGroup));
         }
 

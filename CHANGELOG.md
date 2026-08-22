@@ -5,6 +5,142 @@ All notable changes to the Cuvara DOTS package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.24.0] - 2026-08-22
+
+### Remote entities are now interpolated in ECS, by netcode's core rather than by a second copy of it
+
+Until this release the DOTS path had exactly one way to place a replicated entity: whatever position
+reached `IEntityView.SetState` was written straight to `LocalTransform`. That was correct and it was
+never the whole story — the smoothing was happening one layer up, inside `WorldViewBinder`, and this
+package was consuming its output. It worked, and it fixed nothing that netcode's own interpolation
+could not fix, but it meant the ECS path could never render a remote entity from anything richer
+than a single position, and it meant an ECS client had no way to use the buffered, tick-bracketed,
+clock-driven core that netcode 0.18.0 extracted precisely so a Burst job could call it.
+
+It can now. `RemoteInterpolationSystem` is a `[BurstCompile]` `ISystem` scheduling an `IJobEntity`
+over `(DynamicBuffer<SnapshotSample>, ref LocalTransform, ref LocalToWorld, ref InterpolationState)`,
+and the body of that job is one call to
+`Cuvara.Netcode.Interpolation.SnapshotInterpolation.Evaluate` — the identical method the GameObject
+path calls, over a `SnapshotSampleBuffer` instead of over a pooled array. **There is no interpolation
+arithmetic anywhere in this package.** That is the whole design constraint and not a stylistic one:
+the day two implementations disagree, the symptom is a remote avatar drawn in the wrong place with
+both copies passing their own tests, and the only defence is that the second copy does not exist.
+
+**What a player gets.** A remote avatar that moves at frame rate along the path the server actually
+described, rather than one that holds still for 66 ms and jumps. It is drawn about 100 ms behind the
+newest received tick — netcode's `TargetDelay`, one and a half snapshot intervals at the 15 Hz world
+rate — and that delay is what buys the smoothness: an early snapshot waits in the buffer instead of
+displacing the segment being drawn, a late one is covered by the margin instead of stalling, and a
+dropped one interpolates across two ticks' worth of distance in two ticks' worth of time instead of
+sprinting and freezing. **The local player pays none of it.** A predicted entity carries
+`PredictedTransform`, the job excludes it with `WithNone`, and the one entity whose response delay
+the player is holding a key to feel keeps its zero.
+
+**It is opt-in, because the server tick is.** `IEntityView.SetState` carries `(id, x, y, hp, maxHp)`
+and no tick, and a sample without a tick cannot be placed on a timeline — the same wall
+`ReconciliationAnchor` documents about the anchor's own tick. So the adapter gained its own entry
+point, `DotsEntityView.SetStateAtTick(id, x, y, hp, maxHp, tick, receiveTimeSeconds)`, for a caller
+that has the tick in its hand: a snapshot handler reading `WorldState.Tick`. Nothing else changes.
+A consumer that keeps calling `SetState` gets 0.23.1's behaviour byte for byte.
+
+**And the two paths are mutually exclusive per entity, enforced rather than documented.**
+`WorldViewBinder.Tick` interpolates on the netcode side and hands the *result* to `SetState`, so a
+view driven by the binder is already receiving a rendered position. Buffering those and evaluating
+them again would stack a second `TargetDelay` on top of the first: every remote entity twice as far
+behind the server, moving perfectly smoothly, with no error, no exception and nothing in any log to
+notice — the failure shape this workspace keeps paying for. The drain therefore decides per state:
+a tick means "buffer it, the transform belongs to interpolation", no tick means "write it, the buffer
+stays empty and the job passes over this entity". A refused sample — a duplicate or reordered tick,
+rejected by netcode's shared `InterpolationRing.Accepts` — deliberately does **not** fall back to a
+direct write, because the entity is still owned by interpolation and its superseded state is not
+worth rendering.
+
+### Added
+
+- **`ViewInterpolationGroup`**, inside `ViewSystemGroup` and `UpdateBefore(ViewLifecycleGroup)`.
+  Presentation, not simulation, and that is the load-bearing choice: interpolation answers "where is
+  this drawn on this frame", which is asked once per drawn frame, and `SimulationSystemGroup` would
+  tie it to fixed-step semantics it must not have — a rendered position evaluated at 60 Hz fixed
+  steps while the client draws at 144 Hz is the stutter this exists to remove, reintroduced one layer
+  up. Before the lifecycle group because both of the other view groups *read* the transform:
+  `ViewLifecycleGroup` places a newly spawned view from `LocalToWorld` and `ViewTransformSyncGroup`
+  copies it onto every live GameObject, so running later would show this frame's views at last
+  frame's position — a constant one-frame lag on every remote entity, visible as softness and blamed
+  on the render delay. Created empty by `DotsViewBootstrap` even without netcode, like every other
+  group here, so a consumer's `[UpdateAfter]` resolves today and does not change meaning later.
+  Because `LocalTransform` is now written in presentation, after `TransformSystemGroup` has already
+  finished for the frame, the job composes `LocalToWorld` itself — exactly as `ApplySpawn` and
+  `ApplyState` already do, for exactly the same reason.
+- **`SnapshotSample`**, an `[InternalBufferCapacity(8)]` `IBufferElementData` wrapping netcode's
+  `InterpolationSample`, and **`InterpolationState`**, recording what was last drawn and at which
+  render tick. Both are added in `ApplySpawn` alongside `ReconciliationAnchor`, for the reason that
+  component already states: a component set that changed on the first state would change archetype at
+  snapshot rate, and every query over mirrors would then iterate two chunk sets. The capacity is 8
+  because 8 x 24 B = 192 B is what keeps the buffer inline in the chunk; a ninth sample moves the
+  whole thing to a per-entity heap allocation that area-of-interest churn would repeat. It is the
+  same 8 that `InterpolationConfig.RingCapacity` defaults to, and that constant's own documentation
+  names this attribute.
+- **`InterpolationSettings` and `InterpolationTimeline`**, two blittable singletons: netcode's
+  `InterpolationConfig` plus the `SnapshotSpaceMapping`, and the world's `InterpolationClock`.
+  Components rather than a `ScriptableObject` and rather than a managed reference, because the
+  consumer is a Bursted job and a Bursted job cannot follow either. The mapping is seeded from the
+  view's own, so the space the samples were produced in is the space they are rendered in — samples
+  are stored in server coordinates verbatim, exactly as `ReconciliationAnchor.ServerPosition` is, and
+  projected once after evaluation. Seed the tuning with
+  `DotsNetcodeBootstrap.Install(world, view, interpolation)`; `default` means netcode's defaults,
+  every non-positive field filled in by `Normalized()`.
+- **`InterpolationClockSystem`**, advancing the render clock once per frame from
+  `SystemAPI.Time.DeltaTime` — a system of its own rather than the first lines of the evaluation,
+  so that the frame's advance has one owner no matter how many things come to read the timeline.
+  Ordered by an explicit `[UpdateBefore]` rather than `OrderFirst`, because Entities sorts
+  `OrderFirst` members into a separate batch and then drops ordering relations between that batch and
+  ordinary members, with a warning — the trap `MovementSystemGroup` already documents. The timeline
+  has two writers at two declared points in the frame and that is deliberate: the drain calls
+  `NoteSnapshot` on arrival in initialization, this calls `Advance` once per frame in presentation,
+  and an arrival is not a frame, so they cannot be collapsed into one.
+- **Zero per-frame allocation on the whole path.** The samples live in chunk memory, the singletons
+  are copied by value into job fields, the query is `ScheduleParallel` with no `ToEntityArray`, no
+  `Complete()` and no main-thread walk, and the `ISampleBuffer` wrapper is a struct passed to a
+  `where TBuffer : struct` generic so the indexer calls are constrained calls Burst specialises
+  rather than interface dispatch that boxes. The only copy is the front-shift when a full buffer
+  admits a new sample — at most seven 24-byte elements, inside the chunk, on snapshot arrivals and
+  never on the frame path.
+- **Eight tests in `Tests/Editor.Netcode/RemoteInterpolationTests.cs`**, driven through the public
+  groups and with `SystemAPI.Time` stamped explicitly, because a world updated group by group never
+  advances it and every assertion about motion would otherwise be an assertion about nothing: a
+  ticked state is buffered and drawn from the buffer rather than at the newest state; the rendered
+  position never steps backwards across twenty frames and never runs past what the server sent; a
+  predicted entity is not interpolated *and* keeps accumulating samples so that releasing the tag
+  hands interpolation a history rather than a cold buffer; an unticked state is still written
+  straight to the transform; an empty buffer and a single-sample buffer are both legal and neither
+  throws; a duplicate tick is refused without falling back to a direct write; the clock does not
+  advance before the first snapshot. `NetcodeSystemLayoutTests` gains three more asserting the group
+  containment, the `UpdateBefore` relations in both directions, and that both new systems are
+  internal and not auto-created. `ViewSystemGroupLayoutTests`' hand-maintained group roster gains
+  `ViewInterpolationGroup` — that list is what the "no package group is auto-created" and "every
+  group is public" checks iterate, so a group missing from it is a group nothing checks.
+
+### Changed
+
+- **The `versionDefines` floor for `CUVARA_NETCODE` moves `0.4.0` -> `0.19.0`**, in
+  `Cuvara.DOTS.Netcode`, `Cuvara.DOTS.Netcode.Prediction`, both of their test assemblies and the
+  `NetworkedPrediction` sample. It had to. `Cuvara.Netcode.Interpolation` does not exist before
+  netcode 0.18.0, and 0.19.0 is the version this package now pins and builds against. **Left at
+  0.4.0 the define would still be set against a netcode with no such namespace**, and the adapter
+  would fail to compile with a missing-type error naming `SnapshotInterpolation` — a message that
+  looks like a typo and says nothing about versions, in an assembly whose whole purpose is to be
+  *absent* rather than broken when its dependency is too old. The prediction assemblies move with it
+  rather than staying at `0.15.0` for a reason that is not tidiness: they reference
+  `Cuvara.DOTS.Netcode`, so a project on netcode 0.16 would set their define and not this one,
+  leaving them referencing an assembly that did not compile.
+- **CI's netcode pin moves `v0.16.1` -> `v0.19.0`**, the coupling that file's own header warns about:
+  the pin and what depends on it move together. Nothing in this change compiles against the old pin.
+- `DotsNetcodeBootstrap.Install` gained an optional `InterpolationConfig` parameter and now creates
+  the presentation half of the adapter as well as the initialization half. Existing two-argument call
+  sites compile and behave unchanged.
+
 ## [0.23.1] - 2026-08-20
 
 ### Fixed

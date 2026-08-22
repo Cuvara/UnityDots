@@ -15,6 +15,12 @@ namespace Cuvara.DOTS.Tests.Netcode
     public sealed class NetcodeSystemLayoutTests
     {
         private static readonly Type DrainSystem = typeof(NetworkViewCommandSystem);
+        private static readonly Type InterpolationSystem = typeof(RemoteInterpolationSystem);
+        private static readonly Type ClockSystem = typeof(InterpolationClockSystem);
+
+        private static Type GroupOf(Type type) =>
+            type.GetCustomAttributes(typeof(UpdateInGroupAttribute), false)
+                .Cast<UpdateInGroupAttribute>().Single().GroupType;
 
         [Test]
         public void Drain_IsInTheNetcodeGroup_WhichIsInInitialization()
@@ -38,6 +44,59 @@ namespace Cuvara.DOTS.Tests.Netcode
             Assert.AreEqual(typeof(InitializationSystemGroup),
                 typeof(NetcodeSystemGroup).GetCustomAttributes(typeof(UpdateInGroupAttribute), false)
                     .Cast<UpdateInGroupAttribute>().Single().GroupType);
+        }
+
+        [Test]
+        public void Interpolation_IsInPresentation_AndRunsBeforeAnythingThatReadsTheTransform()
+        {
+            // The other half of the same "same frame" argument, in the other direction. Snapshot
+            // application is early — before this frame's transforms — because everything downstream
+            // reacts to what arrived. Interpolation is late, in presentation, because it answers
+            // "where is this drawn on this frame", which is a per-drawn-frame question and must not
+            // inherit fixed-step semantics from SimulationSystemGroup.
+            Assert.AreEqual(typeof(ViewInterpolationGroup), GroupOf(InterpolationSystem));
+            Assert.AreEqual(typeof(ViewInterpolationGroup), GroupOf(ClockSystem));
+            Assert.AreEqual(typeof(ViewSystemGroup), GroupOf(typeof(ViewInterpolationGroup)));
+            Assert.AreEqual(typeof(PresentationSystemGroup), GroupOf(typeof(ViewSystemGroup)));
+
+            // Before the lifecycle group — and so, transitively, before the sync group that already
+            // declares itself after it. Running later would place this frame's views and copy this
+            // frame's transforms from last frame's interpolated position: a constant one-frame lag
+            // on every remote entity, which reads as softness rather than as an ordering bug.
+            var before = typeof(ViewInterpolationGroup)
+                .GetCustomAttributes(typeof(UpdateBeforeAttribute), false)
+                .Cast<UpdateBeforeAttribute>().Select(a => a.SystemType).ToArray();
+            CollectionAssert.Contains(before, typeof(ViewLifecycleGroup));
+        }
+
+        [Test]
+        public void TheRenderClock_IsAdvancedBeforeAnythingIsEvaluatedAgainstIt()
+        {
+            // An explicit relation rather than OrderFirst: Entities sorts OrderFirst members into a
+            // separate batch and drops ordering relations between that batch and ordinary members,
+            // with a warning. The failure would be a clock advanced after the frame it describes was
+            // already drawn — one frame of lag that no assertion about position could attribute.
+            var before = ClockSystem
+                .GetCustomAttributes(typeof(UpdateBeforeAttribute), false)
+                .Cast<UpdateBeforeAttribute>().Select(a => a.SystemType).ToArray();
+
+            CollectionAssert.Contains(before, InterpolationSystem);
+        }
+
+        [Test]
+        public void InterpolationSystems_AreNotAutoCreated_AndAreInternal()
+        {
+            // Same two reasons as the drain: a second copy in a second world would advance the same
+            // timeline twice per frame, and a public system name is an accidental API promise. The
+            // group is the contract.
+            Assert.IsNotEmpty(InterpolationSystem.GetCustomAttributes(typeof(DisableAutoCreationAttribute), false));
+            Assert.IsNotEmpty(ClockSystem.GetCustomAttributes(typeof(DisableAutoCreationAttribute), false));
+            Assert.IsNotEmpty(typeof(ViewInterpolationGroup)
+                .GetCustomAttributes(typeof(DisableAutoCreationAttribute), false));
+
+            Assert.IsFalse(InterpolationSystem.IsPublic, "a public system name is an accidental API promise");
+            Assert.IsFalse(ClockSystem.IsPublic);
+            Assert.IsTrue(typeof(ViewInterpolationGroup).IsPublic);
         }
 
         [Test]

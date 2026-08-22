@@ -1,5 +1,6 @@
 using System;
 using Cuvara.DOTS.Groups;
+using Cuvara.Netcode.Interpolation;
 using Unity.Entities;
 
 namespace Cuvara.DOTS.Netcode
@@ -24,7 +25,15 @@ namespace Cuvara.DOTS.Netcode
     /// </remarks>
     public static class DotsNetcodeBootstrap
     {
-        public static Entity Install(World world, DotsEntityView view)
+        /// <param name="world">The world that presents.</param>
+        /// <param name="view">The adapter netcode calls.</param>
+        /// <param name="interpolation">
+        /// Remote interpolation tuning. Leave at <c>default</c> for netcode's own defaults — every
+        /// non-positive field is filled from them, which is what <c>default(InterpolationConfig)</c>
+        /// being all zeroes requires. Pass a configured value for a deployment at a world rate other
+        /// than the 15 Hz this package is tuned for.
+        /// </param>
+        public static Entity Install(World world, DotsEntityView view, InterpolationConfig interpolation = default)
         {
             if (world == null) throw new ArgumentNullException(nameof(world));
             if (view == null) throw new ArgumentNullException(nameof(view));
@@ -48,6 +57,14 @@ namespace Cuvara.DOTS.Netcode
             }
 
             InstallSystems(world);
+
+            // Seeded from the view's own mapping, not from a second configuration: the samples are
+            // stored in server space and projected in the job, so the mapping the states arrived
+            // under has to be the mapping they are rendered under. Two independently configured
+            // copies would draw every remote entity in the wrong place with each half passing its
+            // own test.
+            SeedInterpolation(world, interpolation.Normalized(), view.Mapping, overwrite: true);
+
             return entity;
         }
 
@@ -73,9 +90,74 @@ namespace Cuvara.DOTS.Netcode
             netcode.AddSystemToUpdateList(snapshotApply);
             snapshotApply.AddSystemToUpdateList(world.GetOrCreateSystem<NetworkViewCommandSystem>());
 
+            // Remote interpolation is the presentation half of the adapter, and it is installed
+            // from here rather than from DotsViewBootstrap for the reason this whole assembly
+            // exists: the core must keep compiling with com.cuvara.netcode absent, so it cannot
+            // name a system that reads netcode's interpolation core. The group itself is created by
+            // the core bootstrap and stands empty without this call.
+            var presentation = world.GetOrCreateSystemManaged<PresentationSystemGroup>();
+            var viewGroup = world.GetOrCreateSystemManaged<ViewSystemGroup>();
+            var interpolation = world.GetOrCreateSystemManaged<ViewInterpolationGroup>();
+            presentation.AddSystemToUpdateList(viewGroup);
+            viewGroup.AddSystemToUpdateList(interpolation);
+            interpolation.AddSystemToUpdateList(world.GetOrCreateSystem<InterpolationClockSystem>());
+            interpolation.AddSystemToUpdateList(world.GetOrCreateSystem<RemoteInterpolationSystem>());
+
+            // Both singletons exist from installation, with netcode's defaults and this package's
+            // default mapping, so a world whose consumer never calls Install(world, view) — a test
+            // driving the groups directly, say — still has a clock to advance rather than two
+            // systems that never update. Install overwrites them with the view's real mapping.
+            SeedInterpolation(world, InterpolationConfig.Default, SnapshotSpaceMapping.XZPlane, overwrite: false);
+
             // Manual adds are not sorted automatically; without this the group's ordering relations
             // are declared but never applied.
             initialization.SortSystems();
+            presentation.SortSystems();
+        }
+
+        /// <summary>
+        /// Creates or overwrites the two interpolation singletons on one entity.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>The timeline is created but never overwritten.</b> Re-seeding the clock would throw
+        /// away the render moment mid-session, and the clock's entire guarantee is that it is never
+        /// snapped — a reinstall that reset it would step every remote entity backwards, which is
+        /// the exact discontinuity the core was written to remove. A consumer that genuinely wants a
+        /// fresh timeline is starting a fresh session and should dispose the world, as the netcode
+        /// side's <c>Reset</c> exists for.
+        /// </para>
+        /// <para>
+        /// One entity carrying both: they are separate component types, so each is still a
+        /// singleton, and the pair is created and found together.
+        /// </para>
+        /// </remarks>
+        private static void SeedInterpolation(
+            World world,
+            InterpolationConfig config,
+            SnapshotSpaceMapping mapping,
+            bool overwrite)
+        {
+            var entityManager = world.EntityManager;
+            using var query = entityManager.CreateEntityQuery(ComponentType.ReadWrite<InterpolationSettings>());
+
+            var settings = new InterpolationSettings { Config = config, Mapping = mapping };
+
+            if (query.IsEmpty)
+            {
+                var entity = entityManager.CreateEntity();
+                entityManager.AddComponentData(entity, settings);
+                entityManager.AddComponentData(entity, new InterpolationTimeline());
+#if UNITY_EDITOR
+                entityManager.SetName(entity, "InterpolationSettings");
+#endif
+                return;
+            }
+
+            // Only Install overwrites. InstallSystems is also reachable on its own and after
+            // Install, and a bare call must not quietly replace a configured mapping with the
+            // default one — an entity drawn on the wrong plane looks like a networking fault.
+            if (overwrite) entityManager.SetComponentData(query.GetSingletonEntity(), settings);
         }
 
         /// <summary>
@@ -89,9 +171,13 @@ namespace Cuvara.DOTS.Netcode
 
             var entityManager = world.EntityManager;
             using var query = entityManager.CreateEntityQuery(ComponentType.ReadWrite<NetworkEntityViewReference>());
-            if (query.IsEmpty) return;
+            if (!query.IsEmpty) entityManager.DestroyEntity(query.GetSingletonEntity());
 
-            entityManager.DestroyEntity(query.GetSingletonEntity());
+            // The interpolation singletons go with it: they are this assembly's, and leaving a
+            // render clock behind in a world whose adapter was removed would keep advancing a
+            // timeline nothing feeds.
+            using var interpolation = entityManager.CreateEntityQuery(ComponentType.ReadWrite<InterpolationSettings>());
+            if (!interpolation.IsEmpty) entityManager.DestroyEntity(interpolation.GetSingletonEntity());
         }
     }
 }

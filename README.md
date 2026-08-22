@@ -56,17 +56,22 @@ binder.Tick(worldState, networkClient.UserId);
 
 Each replicated id becomes an entity carrying `NetworkEntity` (the wire id, the server's entity kind,
 and `IsLocal`), `NetworkEntityState` (the newest authoritative hp), `ReconciliationAnchor` (the newest
-authoritative position), a `LocalTransform`, and the
+authoritative position), a `SnapshotSample` buffer and an `InterpolationState` (what remote
+interpolation has to work with, and what it last drew), a `LocalTransform`, and the
 `EntityViewRequest` + `ViewConfigRef` pair the spawn path already understands. Nothing about the
 presentation is hardcoded: the prefab, pool size, scale and offsets all come from the `ViewConfig` the
 resolver named.
 
 Four things worth knowing before wiring it up:
 
-- **Requires `com.cuvara.netcode` 0.4.0 or newer**, enforced by the asmdef's `versionDefines`
+- **Requires `com.cuvara.netcode` 0.19.0 or newer**, enforced by the asmdef's `versionDefines`
   expression rather than by a `package.json` dependency. With an older netcode installed the define
   is never set and `Cuvara.DOTS.Netcode` simply does not compile into the project — the adapter is
-  absent instead of broken. 0.4.0 is the release that added the entity type to `IEntityView.Spawn`.
+  absent instead of broken. The floor was 0.4.0, the release that added the entity type to
+  `IEntityView.Spawn`; it is 0.19.0 from this version because remote interpolation reads
+  `Cuvara.Netcode.Interpolation`, which does not exist before then. Left at 0.4.0 the define would
+  be set against a netcode that has no such namespace, and the adapter would fail to compile with a
+  missing-type error that names a type rather than a version.
 - **Kind comes from the wire, never from the id.** `TypeArchetypeResolver` maps the server's entity
   type (`"player"`, `"mob"`, …) to an archetype name, exactly and ordinally. Inferring kind from an
   id prefix is what `PrefixArchetypeResolver` did before 0.9.0, and it is gone.
@@ -83,6 +88,29 @@ Four things worth knowing before wiring it up:
 - **Wire hp lands on `NetworkEntityState`, not on `Health`.** `Health` means "destroy at zero" in
   this package, so mirroring server hp into it lets a client-side system destroy an entity the
   server still lists. Pass `writeHealth: true` if you want that anyway.
+- **Remote entities can be interpolated in ECS, and it is opt-in because the tick is.**
+  `IEntityView.SetState` carries no server tick, and without one there is no timeline to place a
+  state on — so a state arriving through the interface is applied exactly as it always was, written
+  straight to the transform. `DotsEntityView.SetStateAtTick(id, x, y, hp, maxHp, tick, receiveTime)`
+  is the adapter's own entry point for a caller that *does* have the tick, typically a snapshot
+  handler reading `WorldState.Tick`. A state with a tick is appended to the entity's `SnapshotSample`
+  buffer and rendered every frame by `RemoteInterpolationSystem`, which evaluates
+  `Cuvara.Netcode.Interpolation.SnapshotInterpolation` — netcode's own core, the same one
+  `WorldViewBinder` uses, in a Bursted `IJobEntity` over chunk memory. There is no interpolation
+  arithmetic in this package and there must never be.
+
+  **Do not feed the same entity both ways.** `WorldViewBinder.Tick` interpolates on the netcode side
+  and hands the *result* to `SetState`, so buffering those and interpolating again would stack a
+  second `TargetDelay` on top of the first — remote entities twice as far behind, smoothly, with
+  nothing to notice. The drain enforces the split per entity rather than trusting it: a ticked state
+  is buffered and the transform is left alone; an unticked one is written and the buffer stays empty,
+  so the job passes over the entity.
+
+  Tuning is `DotsNetcodeBootstrap.Install(world, view, interpolation)` — an `InterpolationConfig`,
+  netcode's own blittable struct, published as the `InterpolationSettings` singleton because a
+  `[BurstCompile]` job cannot read a `ScriptableObject`. `default` means netcode's defaults: 100 ms
+  of render delay and 8 retained samples. The local player pays none of it — a predicted entity
+  carries `PredictedTransform` and is excluded.
 - **A predictor takes the transform by adding `PredictedTransform`.** The adapter then writes only
   `ReconciliationAnchor` — the last authoritative position, in world space — and leaves
   `LocalTransform` alone, so each component has exactly one writer. Without the tag nothing changes:
@@ -129,6 +157,9 @@ SimulationSystemGroup                         [Unity]
 └── TransformSystemGroup                      [Unity]
 PresentationSystemGroup                       [Unity]
 └── ViewSystemGroup
+    ├── ViewInterpolationGroup                UpdateBefore(ViewLifecycleGroup); empty without netcode
+    │   ├── InterpolationClockSystem          advances the render clock once per frame
+    │   └── RemoteInterpolationSystem         UpdateAfter(InterpolationClockSystem)
     ├── ViewLifecycleGroup                    structural: views appear/disappear
     │   ├── EntityViewDespawnSystem           first — freed instances reusable this frame
     │   └── EntityViewSpawnSystem             UpdateAfter(EntityViewDespawnSystem)
@@ -244,7 +275,7 @@ Optional, and resolved by your project rather than by this package:
 
 | Package | Enables | Define |
 |---|---|---|
-| `com.cuvara.netcode` **>= 0.4.0** | `Cuvara.DOTS.Netcode` — `IEntityView` over ECS | `CUVARA_NETCODE` |
+| `com.cuvara.netcode` **>= 0.19.0** | `Cuvara.DOTS.Netcode` — `IEntityView` over ECS | `CUVARA_NETCODE` |
 | `com.rpgmmo.shared-gamelogic` | `Cuvara.DOTS.GameLogic` | `CUVARA_SHARED_GAMELOGIC` |
 | VContainer | `Cuvara.DOTS.DI` | `CUVARA_DOTS_VCONTAINER` |
 

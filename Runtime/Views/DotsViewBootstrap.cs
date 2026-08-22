@@ -103,9 +103,14 @@ namespace Cuvara.DOTS.Views
             gameplay.AddSystemToUpdateList(commandBuffer);
 
             var view = world.GetOrCreateSystemManaged<ViewSystemGroup>();
+            var viewInterpolation = world.GetOrCreateSystemManaged<ViewInterpolationGroup>();
             var viewLifecycle = world.GetOrCreateSystemManaged<ViewLifecycleGroup>();
             var viewSync = world.GetOrCreateSystemManaged<ViewTransformSyncGroup>();
             presentation.AddSystemToUpdateList(view);
+            // Empty without the netcode adapter, and created anyway — same rule as the netcode and
+            // prediction groups above. Its position is what a consumer's [UpdateAfter] resolves
+            // against, and a group that appeared later would shift the phase silently.
+            view.AddSystemToUpdateList(viewInterpolation);
             view.AddSystemToUpdateList(viewLifecycle);
             view.AddSystemToUpdateList(viewSync);
             viewLifecycle.AddSystemToUpdateList(world.GetOrCreateSystem<EntityViewDespawnSystem>());

@@ -5,6 +5,7 @@
         "Cuvara.DOTS.Runtime",
         "Cuvara.Netcode.Runtime",
         "Unity.Entities",
+        "Unity.Burst",
         "Unity.Collections",
         "Unity.Mathematics",
         "Unity.Transforms"
@@ -21,7 +22,7 @@
     "versionDefines": [
         {
             "name": "com.cuvara.netcode",
-            "expression": "0.4.0",
+            "expression": "0.19.0",
             "define": "CUVARA_NETCODE"
         }
     ],

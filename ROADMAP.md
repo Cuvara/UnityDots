@@ -95,6 +95,11 @@ alongside the simulation seam and the messaging seam that were pulled forward ah
   physics engine, and will not pretend otherwise.
 - **Snapshot merge, interpolation, transport, codec, entity-handle interning.** `com.cuvara.netcode`
   owns them; a second copy of the merge rule is the divergence the shared-logic boundary prevents.
+  This stays true now that remote entities are interpolated in ECS: `RemoteInterpolationSystem`
+  *calls* `Cuvara.Netcode.Interpolation.SnapshotInterpolation` from a Burst job over a
+  `DynamicBuffer`, and the arithmetic lives entirely on the netcode side. Owning the schedule is not
+  owning the algorithm — a lerp appearing in this package would be exactly the divergence this line
+  forbids.
 
 ## Measurement caveat
 
