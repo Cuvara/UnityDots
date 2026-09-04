@@ -1,6 +1,6 @@
 {
   "name": "com.cuvara.dots",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "displayName": "Cuvara DOTS",
   "description": "Shared DOTS/ECS building blocks for Cuvara projects — reusable components, systems, jobs and authoring helpers built on Unity Entities, Burst, Collections and Mathematics.",
   "unity": "6000.3",
@@ -33,6 +33,11 @@
       "displayName": "Networked Prediction",
       "description": "Drives the netcode adapter and the prediction driver end to end against a running backend. Replicated entities become ECS entities with pooled primitive views; the local player is client-side predicted. An on-screen overlay shows what the server sent beside where it was drawn, and which of the two writers owns the local transform.",
       "path": "Samples~/NetworkedPrediction"
+    },
+    {
+      "displayName": "Stress Benchmark",
+      "description": "Pure DOTS and hybrid entity stress benchmark. Measures simulation + Unity.Physics throughput at 100 to 100M entities. Two modes: pure ECS (no views) and hybrid (pooled GameObjects). Command-line activated via -stress-pure or -stress-hybrid.",
+      "path": "Samples~/StressBenchmark"
     }
   ],
   "testables": [

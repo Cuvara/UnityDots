@@ -1,0 +1,28 @@
+{
+    "name": "Cuvara.DOTS.Samples.StressBenchmark",
+    "rootNamespace": "Cuvara.DOTS.Samples.StressBenchmark",
+    "references": [
+        "Cuvara.DOTS.Runtime",
+        "Unity.Entities",
+        "Unity.Burst",
+        "Unity.Collections",
+        "Unity.Mathematics",
+        "Unity.Transforms",
+        "Unity.Physics"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.physics",
+            "expression": "",
+            "define": "DOTS_PHYSICS"
+        }
+    ],
+    "noEngineReferences": false
+}
