@@ -7,23 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.25.0] - 2026-09-04
-
-### Added
-
-- **Stress Benchmark sample** (`Samples~/StressBenchmark/`). Two modes measuring
-  cuvara.dots simulation + Unity.Physics throughput at entity tiers 100 to 100M:
-  - **Pure DOTS** (`-stress-pure`) — raw ECS throughput with no GameObjects or
-    rendering. Measured 1,246 FPS at 1K entities, 81 FPS at 1M with 300K physics
-    bodies.
-  - **Hybrid** (`-stress-hybrid`) — simulation plus pooled primitive views, capped
-    at 50K GameObjects; simulation-only beyond that.
-  - Each tier spawns 70% simulation-only + 30% Unity.Physics bodies (configurable).
-    Memory guard auto-skips tiers that would exceed 60% system RAM. Batch entity
-    creation in 64K chunks avoids single large allocations.
-  - CLI flags: `-stress-pure`, `-stress-hybrid`, `-stress-quick` (100 to 1M only),
-    `-stress-no-physics`. Results logged as `[STRESS-BENCH]` lines.
-
 ## [0.24.0] - 2026-08-22
 
 ### Remote entities are now interpolated in ECS, by netcode's core rather than by a second copy of it
