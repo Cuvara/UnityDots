@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Unity.Collections;
+using Cuvara.DOTS.Configuration;
 using Cuvara.DOTS.Groups;
 using Unity.Entities;
 
