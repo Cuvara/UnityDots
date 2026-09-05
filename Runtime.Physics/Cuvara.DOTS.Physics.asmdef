@@ -1,0 +1,30 @@
+{
+    "name": "Cuvara.DOTS.Physics",
+    "rootNamespace": "Cuvara.DOTS.Physics",
+    "references": [
+        "Cuvara.DOTS.Runtime",
+        "Unity.Entities",
+        "Unity.Burst",
+        "Unity.Collections",
+        "Unity.Mathematics",
+        "Unity.Transforms",
+        "Unity.Physics"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "CUVARA_DOTS_PHYSICS"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.unity.physics",
+            "expression": "1.0.0",
+            "define": "CUVARA_DOTS_PHYSICS"
+        }
+    ],
+    "noEngineReferences": false
+}
