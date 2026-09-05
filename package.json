@@ -4,7 +4,7 @@
   "displayName": "Cuvara DOTS",
   "description": "Shared DOTS/ECS building blocks for Cuvara projects — reusable components, systems, jobs and authoring helpers built on Unity Entities, Burst, Collections and Mathematics.",
   "unity": "6000.3",
-  "documentationUrl": "",
+  "documentationUrl": "https://github.com/Cuvara/DOTS",
   "license": "MIT",
   "keywords": [
     "dots",
