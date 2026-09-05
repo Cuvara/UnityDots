@@ -7,8 +7,7 @@
         "Unity.Burst",
         "Unity.Collections",
         "Unity.Mathematics",
-        "Unity.Transforms",
-        "Unity.Physics"
+        "Unity.Transforms"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
@@ -20,7 +19,7 @@
     "versionDefines": [
         {
             "name": "com.unity.physics",
-            "expression": "",
+            "expression": "1.0.0",
             "define": "DOTS_PHYSICS"
         }
     ],
