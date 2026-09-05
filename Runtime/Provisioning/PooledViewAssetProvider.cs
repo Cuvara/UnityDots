@@ -183,7 +183,7 @@ namespace Cuvara.DOTS.Provisioning
             }
             else
             {
-                UnityEngine.Object.Destroy(instance);
+                SafeDestroy(instance);
             }
         }
 
@@ -194,7 +194,7 @@ namespace Cuvara.DOTS.Provisioning
                 while (pool.Count > 0)
                 {
                     var instance = pool.Dequeue();
-                    if (instance != null) UnityEngine.Object.Destroy(instance);
+                    if (instance != null) SafeDestroy(instance);
                 }
                 _pools.Remove(key);
             }
@@ -210,7 +210,7 @@ namespace Cuvara.DOTS.Provisioning
                 while (pool.Count > 0)
                 {
                     var instance = pool.Dequeue();
-                    if (instance != null) UnityEngine.Object.Destroy(instance);
+                    if (instance != null) SafeDestroy(instance);
                 }
             }
             _pools.Clear();
@@ -219,7 +219,7 @@ namespace Cuvara.DOTS.Provisioning
             _prefabs.Clear();
 
             if (_poolRoot != null && _poolRoot.gameObject != null)
-                UnityEngine.Object.Destroy(_poolRoot.gameObject);
+                SafeDestroy(_poolRoot.gameObject);
         }
 
         /// <summary>Number of pooled (inactive) instances for a key.</summary>
@@ -234,6 +234,19 @@ namespace Cuvara.DOTS.Provisioning
             foreach (var go in _active)
                 if (go != null && go.name.Contains(tag)) count++;
             return count;
+        }
+
+        private static void SafeDestroy(UnityEngine.Object obj)
+        {
+            if (obj == null) return;
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+            {
+                UnityEngine.Object.DestroyImmediate(obj);
+                return;
+            }
+#endif
+            UnityEngine.Object.Destroy(obj);
         }
     }
 }
