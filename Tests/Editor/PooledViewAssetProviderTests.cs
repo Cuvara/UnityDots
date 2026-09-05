@@ -45,13 +45,13 @@ namespace Cuvara.DOTS.Tests.Editor
         public void Acquire_ReusesPooledInstance()
         {
             _provider.PrewarmAsync("goblin", 4);
-            Assert.AreEqual(2, _provider.GetPooledCount("goblin"));
+            Assert.AreEqual(4, _provider.GetPooledCount("goblin"));
 
             var instance = _provider.Acquire("goblin", Vector3.zero, Quaternion.identity);
 
             Assert.IsNotNull(instance);
             Assert.IsTrue(instance.activeSelf);
-            Assert.AreEqual(1, _provider.GetPooledCount("goblin")); // one taken from pool
+            Assert.AreEqual(3, _provider.GetPooledCount("goblin")); // one taken from pool
             Assert.AreEqual(1, _provider.ActiveCount);
         }
 
@@ -66,7 +66,7 @@ namespace Cuvara.DOTS.Tests.Editor
 
             Assert.IsFalse(instance.activeSelf);
             Assert.AreEqual(0, _provider.ActiveCount);
-            Assert.AreEqual(2, _provider.GetPooledCount("goblin")); // back to 2
+            Assert.AreEqual(4, _provider.GetPooledCount("goblin")); // back to 4
         }
 
         [Test]
@@ -127,7 +127,7 @@ namespace Cuvara.DOTS.Tests.Editor
                 _provider.ReleaseInstance(instance);
             }
 
-            Assert.AreEqual(2, _provider.GetPooledCount("goblin"));
+            Assert.AreEqual(4, _provider.GetPooledCount("goblin"));
         }
 
         [Test]
