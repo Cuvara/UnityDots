@@ -200,6 +200,89 @@ namespace Cuvara.DOTS.Views
             _liveByKey.Clear();
         }
 
+        /// <summary>
+        /// Detects views whose <c>Transform</c> was destroyed externally (scene unload,
+        /// manual <c>Object.Destroy</c>, editor reset) and despawns them. Returns the
+        /// number of stale entries cleaned up.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A stale link is an invisible entity: the ECS side thinks it has a view but the
+        /// GameObject is gone. <see cref="ApplyTransform"/> silently skips it, and nothing
+        /// else ever removes the entry. This sweep turns that silent failure into an
+        /// explicit despawn so the entity can respawn if desired.
+        /// </para>
+        /// <para>
+        /// Called by <see cref="EntityViewDespawnSystem"/> once per frame, before the
+        /// entity-destroyed query. The cost is one dictionary scan — no allocation, no
+        /// Unity API call per healthy view (only <c>!= null</c> on cached references).
+        /// </para>
+        /// </remarks>
+        public int SweepDestroyed()
+        {
+            if (_transforms.Count == 0) return 0;
+
+            // Collect stale IDs first — cannot modify _transforms while iterating it.
+            List<int> stale = null;
+            foreach (var pair in _transforms)
+            {
+                if (pair.Value == null)
+                {
+                    if (stale == null) stale = new List<int>();
+                    stale.Add(pair.Key);
+                }
+            }
+
+            if (stale == null) return 0;
+
+            for (int i = 0; i < stale.Count; i++)
+            {
+                var viewId = stale[i];
+                _views.Remove(viewId);
+                _transforms.Remove(viewId);
+                _keys.TryGetValue(viewId, out var key);
+                _keys.Remove(viewId);
+                DecrementLive(key);
+                _despawnedPublisher.Publish(new ViewDespawned(viewId, key));
+            }
+
+            if (stale.Count > 0)
+            {
+                Debug.LogWarning(
+                    $"[Cuvara.DOTS] SweepDestroyed cleaned up {stale.Count} view(s) whose " +
+                    "GameObject was destroyed externally. Entities holding these links are now " +
+                    "invisible and may re-enter the spawn queue.");
+            }
+
+            return stale.Count;
+        }
+
+        /// <summary>
+        /// Returns the view IDs of all views whose <c>Transform</c> is null (destroyed externally).
+        /// Used by <see cref="EntityViewDespawnSystem"/> to remove the <see cref="EntityViewLink"/>
+        /// from the owning entity so it can respawn.
+        /// </summary>
+        public void GetSweepedViewIds(List<int> result)
+        {
+            result.Clear();
+            foreach (var pair in _transforms)
+            {
+                if (pair.Value == null) result.Add(pair.Key);
+            }
+        }
+
+        /// <summary>Total number of live views.</summary>
+        public int TotalViews => _views.Count;
+
+        /// <summary>Number of distinct warm keys with at least one live view.</summary>
+        public int TotalKeys => _liveByKey.Count;
+
+        /// <summary>Live view counts per key. Read-only view for diagnostics.</summary>
+        public IReadOnlyDictionary<string, int> LiveCountsByKey => _liveByKey;
+
+        /// <summary>Deferred spawn frame counts per key. Read-only view for diagnostics.</summary>
+        public IReadOnlyDictionary<string, int> DeferralsByKey => _deferrals;
+
         private void DecrementLive(string key)
         {
             if (key == null || !_liveByKey.TryGetValue(key, out var live)) return;

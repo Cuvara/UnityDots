@@ -79,6 +79,9 @@ namespace Cuvara.DOTS.Provisioning
         /// <summary>chunk ids whose prewarm has completed, as opposed to merely started.</summary>
         private readonly HashSet<string> _loaded = new HashSet<string>();
 
+        /// <summary>Per-chunk lifecycle state for diagnostics.</summary>
+        private readonly Dictionary<string, ChunkState> _chunkStates = new Dictionary<string, ChunkState>();
+
         /// <param name="cascadeSink">
         /// Tears down the views standing on the keys a release drops, before the assets go. Optional,
         /// and <b>omitting it is unsafe for streaming</b>: without it the provisioner cannot reach
@@ -129,6 +132,24 @@ namespace Cuvara.DOTS.Provisioning
         public bool IsChunkLoaded(string chunkId) => chunkId != null && _loaded.Contains(chunkId);
 
         /// <summary>
+        /// Lifecycle state of each tracked chunk. Read-only view for diagnostics and editor
+        /// tooling. Keys are chunk ids; values transition Pending → Warming → Warm → Released.
+        /// Released chunks are removed from the dictionary.
+        /// </summary>
+        public IReadOnlyDictionary<string, ChunkState> ChunkStates => _chunkStates;
+
+        /// <summary>Number of chunks in <see cref="ChunkState.Warm"/> state.</summary>
+        public int WarmChunkCount => _loaded.Count;
+
+        /// <summary>Number of chunks tracked but not yet fully loaded.</summary>
+        public int PendingChunkCount => _chunkKeys.Count - _loaded.Count;
+
+        /// <summary>
+        /// Raised when a chunk transitions state. Useful for loading screens and editor tooling.
+        /// </summary>
+        public event Action<string, ChunkState> OnChunkStateChanged;
+
+        /// <summary>
         /// Warms every key the chunk needs. Returns once all newly-required loads finished; keys
         /// already warm from another chunk cost nothing.
         /// </summary>
@@ -170,6 +191,7 @@ namespace Cuvara.DOTS.Provisioning
 
             _chunkKeys[chunkId] = newSet;
             _loaded.Remove(chunkId); // re-warming reopens the loading window
+            SetChunkState(chunkId, toWarm.Count > 0 ? ChunkState.Warming : ChunkState.Warm);
 
             if (toWarm.Count == 1)
             {
@@ -191,6 +213,7 @@ namespace Cuvara.DOTS.Provisioning
             if (_chunkKeys.TryGetValue(chunkId, out var current) && ReferenceEquals(current, newSet))
             {
                 _loaded.Add(chunkId);
+                SetChunkState(chunkId, ChunkState.Warm);
                 _warmedPublisher.Publish(new ChunkWarmed(chunkId, newSet.Count));
             }
         }
@@ -239,6 +262,8 @@ namespace Cuvara.DOTS.Provisioning
                 _cascadePublisher.Publish(new ChunkCascadeReleased(chunkId, expiring.Count, despawned));
             }
 
+            SetChunkState(chunkId, ChunkState.Released);
+            _chunkStates.Remove(chunkId); // released chunks leave the state table
             _releasedPublisher.Publish(new ChunkReleased(chunkId, true, despawned));
             return new ChunkReleaseResult(true, true, despawned, expiring.Count);
         }
@@ -268,6 +293,12 @@ namespace Cuvara.DOTS.Provisioning
             _refCounts.Remove(key);
             _warmCounts.Remove(key);
             _provider.Release(key);
+        }
+
+        private void SetChunkState(string chunkId, ChunkState newState)
+        {
+            _chunkStates[chunkId] = newState;
+            OnChunkStateChanged?.Invoke(chunkId, newState);
         }
     }
 }
