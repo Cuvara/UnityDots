@@ -107,7 +107,7 @@ namespace Cuvara.DOTS.Tests.Editor
             var entity = ArchetypeFactory.Create(_world.EntityManager, _preset);
             Assert.IsTrue(_world.EntityManager.HasComponent<TimeToLive>(entity));
             var ttl = _world.EntityManager.GetComponentData<TimeToLive>(entity);
-            Assert.AreEqual(5f, ttl.RemainingSeconds, 0.01f);
+            Assert.AreEqual(5f, ttl.Remaining, 0.01f);
         }
     }
 }

@@ -30,7 +30,7 @@ namespace Cuvara.DOTS.Configuration
                 Rotation = quaternion.identity,
                 Scale = 1f,
             });
-            em.AddComponentData(entity, LocalToWorld.FromPosition(position));
+            em.AddComponentData(entity, new LocalToWorld { Value = float4x4.TRS(position, quaternion.identity, new float3(1)) });
 
             // View request
             if (!string.IsNullOrEmpty(preset.viewKey))
@@ -62,7 +62,7 @@ namespace Cuvara.DOTS.Configuration
             {
                 em.AddComponentData(entity, new TimeToLive
                 {
-                    RemainingSeconds = preset.timeToLive,
+                    Remaining = preset.timeToLive,
                 });
             }
 
