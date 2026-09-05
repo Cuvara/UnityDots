@@ -116,6 +116,7 @@ namespace Cuvara.DOTS.Views
             viewLifecycle.AddSystemToUpdateList(world.GetOrCreateSystem<EntityViewDespawnSystem>());
             viewLifecycle.AddSystemToUpdateList(world.GetOrCreateSystem<EntityViewSpawnSystem>());
             viewSync.AddSystemToUpdateList(world.GetOrCreateSystem<EntityViewTransformSyncSystem>());
+            viewSync.AddSystemToUpdateList(world.GetOrCreateSystem<ViewOverlaySystem>());
 
             // Sorting is not automatic after a manual add: without this the UpdateAfter chain inside
             // each group is declared but not applied.
