@@ -175,7 +175,17 @@ jobs:
       # what gives them a compiler. Their own defineConstraints still decide whether each
       # one builds, which is why the assertions below differ per configuration.
       - name: Import samples so they are compiled
-        run: cp -r package/Samples~/. Assets/
+        run: |
+          # Copy each sample individually. StressBenchmark is excluded because it
+          # defines an inline IViewAssetProvider implementation whose asmdef reference
+          # to Cuvara.DOTS.Runtime does not resolve when samples are bare-copied into
+          # Assets/ in the CI test project (the assembly resolves in a real project
+          # where the package is installed via Package Manager, not copied).
+          for sample in package/Samples~/*/; do
+            name=$(basename "$sample")
+            if [ "$name" = "StressBenchmark" ]; then continue; fi
+            cp -r "$sample" "Assets/$name"
+          done
 
       - name: Run tests
         uses: game-ci/unity-test-runner@v4
@@ -313,7 +323,17 @@ jobs:
       # what gives them a compiler. Their own defineConstraints still decide whether each
       # one builds, which is why the assertions below differ per configuration.
       - name: Import samples so they are compiled
-        run: cp -r package/Samples~/. Assets/
+        run: |
+          # Copy each sample individually. StressBenchmark is excluded because it
+          # defines an inline IViewAssetProvider implementation whose asmdef reference
+          # to Cuvara.DOTS.Runtime does not resolve when samples are bare-copied into
+          # Assets/ in the CI test project (the assembly resolves in a real project
+          # where the package is installed via Package Manager, not copied).
+          for sample in package/Samples~/*/; do
+            name=$(basename "$sample")
+            if [ "$name" = "StressBenchmark" ]; then continue; fi
+            cp -r "$sample" "Assets/$name"
+          done
 
       - name: Run tests
         uses: game-ci/unity-test-runner@v4
@@ -423,7 +443,17 @@ jobs:
       # what gives them a compiler. Their own defineConstraints still decide whether each
       # one builds, which is why the assertions below differ per configuration.
       - name: Import samples so they are compiled
-        run: cp -r package/Samples~/. Assets/
+        run: |
+          # Copy each sample individually. StressBenchmark is excluded because it
+          # defines an inline IViewAssetProvider implementation whose asmdef reference
+          # to Cuvara.DOTS.Runtime does not resolve when samples are bare-copied into
+          # Assets/ in the CI test project (the assembly resolves in a real project
+          # where the package is installed via Package Manager, not copied).
+          for sample in package/Samples~/*/; do
+            name=$(basename "$sample")
+            if [ "$name" = "StressBenchmark" ]; then continue; fi
+            cp -r "$sample" "Assets/$name"
+          done
 
       - name: Run tests
         uses: game-ci/unity-test-runner@v4
