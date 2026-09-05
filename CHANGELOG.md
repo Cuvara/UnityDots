@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-09-06
+
+### Added
+
+- **Runtime.Physics optional assembly** (`Cuvara.DOTS.Physics`) — gated by
+  `com.unity.physics >= 1.0.0`. PhysicsBodyFactory (dynamic/static/kinematic),
+  CollisionEventSystem, SpatialQuery (overlap sphere, raycast, closest body),
+  PhysicsMovementBridge (MoveData → PhysicsVelocity sync).
+- **Robust despawn** — `EntityViewRegistry.SweepDestroyed()` detects views whose
+  GameObject was destroyed externally and cleans up stale entries.
+- **Chunk provisioner metrics** — `ChunkState` enum (Pending/Warming/Warm/Released),
+  `ChunkStates` dictionary, `WarmChunkCount`/`PendingChunkCount`, `OnChunkStateChanged`
+  event.
+- **View overlay anchors** — `ViewOverlayAnchor` component, `ViewOverlayBuffer`
+  singleton, `ViewOverlayCollectJob` (Burst), `ViewOverlaySystem` for world-space
+  health bars and name plates.
+- **Editor debug window** — Window > Cuvara > DOTS View Debug: live view counts,
+  key states, deferred spawn tracking.
+- **ProductionHardening sample** — scripted 7-step demo of all new features.
+- **Documentation** — `Documentation~/OVERVIEW.md`, `VIEW-PROVISIONING.md`,
+  `NETCODE-INTEGRATION.md`.
+- **Diagnostic APIs** — `TotalViews`, `TotalKeys`, `LiveCountsByKey`, `DeferralsByKey`
+  on `EntityViewRegistry`.
+
+### Fixed
+
+- `EntityViewDespawnSystem` now sweeps externally-destroyed GameObjects every frame.
+
+## [0.25.0] - 2026-09-04
+
+### Added
+
+- **Stress Benchmark sample** (`Samples~/StressBenchmark/`) — pure DOTS and hybrid
+  modes measuring simulation + Unity.Physics throughput at 100 → 100M entities.
+
 ## [0.24.0] - 2026-08-22
 
 ### Remote entities are now interpolated in ECS, by netcode's core rather than by a second copy of it

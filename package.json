@@ -1,6 +1,6 @@
 {
   "name": "com.cuvara.dots",
-  "version": "0.25.0",
+  "version": "0.26.0",
   "displayName": "Cuvara DOTS",
   "description": "Shared DOTS/ECS building blocks for Cuvara projects — reusable components, systems, jobs and authoring helpers built on Unity Entities, Burst, Collections and Mathematics.",
   "unity": "6000.3",
