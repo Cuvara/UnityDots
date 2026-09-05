@@ -44,7 +44,7 @@ namespace Cuvara.DOTS.Tests.Editor
         [Test]
         public void Acquire_ReusesPooledInstance()
         {
-            _provider.PrewarmAsync("goblin", 2);
+            _provider.PrewarmAsync("goblin", 4);
             Assert.AreEqual(2, _provider.GetPooledCount("goblin"));
 
             var instance = _provider.Acquire("goblin", Vector3.zero, Quaternion.identity);
@@ -58,7 +58,7 @@ namespace Cuvara.DOTS.Tests.Editor
         [Test]
         public void ReleaseInstance_ReturnsToPool()
         {
-            _provider.PrewarmAsync("goblin", 2);
+            _provider.PrewarmAsync("goblin", 4);
             var instance = _provider.Acquire("goblin", Vector3.zero, Quaternion.identity);
             Assert.AreEqual(1, _provider.ActiveCount);
 
@@ -117,7 +117,7 @@ namespace Cuvara.DOTS.Tests.Editor
         [Test]
         public void AcquireReleaseCycle_NoInstantiateAfterWarm()
         {
-            _provider.PrewarmAsync("goblin", 2);
+            _provider.PrewarmAsync("goblin", 4);
 
             // Cycle 10 times — should reuse the same 2 instances
             for (int i = 0; i < 10; i++)
