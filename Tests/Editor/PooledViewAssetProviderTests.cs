@@ -14,7 +14,8 @@ namespace Cuvara.DOTS.Tests.Editor
         {
             _prefab = new GameObject("TestPrefab");
             _prefab.SetActive(false); // prefabs are inactive
-            _provider = new PooledViewAssetProvider(defaultPoolSize: 4, maxPoolSize: 8);
+            var poolRoot = new UnityEngine.GameObject("[TestPoolRoot]").transform;
+            _provider = new PooledViewAssetProvider(poolRoot, defaultPoolSize: 4, maxPoolSize: 8);
             _provider.RegisterPrefab("goblin", _prefab);
         }
 
@@ -82,7 +83,8 @@ namespace Cuvara.DOTS.Tests.Editor
         [Test]
         public void ReleaseInstance_BeyondMaxPoolSize_DestroysExcess()
         {
-            _provider = new PooledViewAssetProvider(defaultPoolSize: 2, maxPoolSize: 3);
+            var root2 = new UnityEngine.GameObject("[TestPoolRoot2]").transform;
+            _provider = new PooledViewAssetProvider(root2, defaultPoolSize: 2, maxPoolSize: 3);
             _provider.RegisterPrefab("goblin", _prefab);
             _provider.PrewarmAsync("goblin", 3);
 
