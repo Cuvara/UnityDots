@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-09-06
+
+### Added
+
+- PooledViewAssetProvider — SetActive pooling for views (12 tests)
+- EntityArchetypePreset + ArchetypeFactory — reusable component presets (8 tests)
+- CameraFollowSystem — smooth damp camera follow
+- NetworkEntitySpawned/Despawned lifecycle events
+- MinimapEntry + MinimapBuffer for minimap rendering
+
 ## [0.26.1] - 2026-09-06
 
 ### Added
