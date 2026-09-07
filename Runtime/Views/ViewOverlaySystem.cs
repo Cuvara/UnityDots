@@ -1,6 +1,7 @@
 using Cuvara.DOTS.Groups;
 using Unity.Collections;
 using Unity.Entities;
+using Unity.Transforms;
 
 namespace Cuvara.DOTS.Views
 {
@@ -30,8 +31,13 @@ namespace Cuvara.DOTS.Views
 
         public void OnCreate(ref SystemState state)
         {
+            // Every component the job's Execute reads, LocalToWorld included. Entities refuses to
+            // schedule an IJobEntity over a custom query that is narrower than the job — with an
+            // InvalidOperationException from inside the group update, which logs and leaves the
+            // buffer empty rather than failing anything. The 0.26.0 query omitted LocalToWorld and no
+            // test ran the system until 0.28; the first one that did found the buffer always empty.
             _anchored = new EntityQueryBuilder(Allocator.Temp)
-                .WithAll<EntityViewLink, ViewOverlayAnchor>()
+                .WithAll<EntityViewLink, ViewOverlayAnchor, LocalToWorld>()
                 .Build(ref state);
 
             state.RequireForUpdate<EntityViewRegistryReference>();

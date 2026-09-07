@@ -29,6 +29,12 @@ Contract document: `Documentation~/MINIMAP-OVERLAY.md`.
   marks the mirror at spawn. A mirror exists exactly while the server lists the id, so an entity the
   area of interest omitted has no marker and no entry, and no host code can widen that through the
   interface.
+- **`ViewOverlaySystem` never produced an entry, in any version since 0.26.0.** Its query was
+  `EntityViewLink + ViewOverlayAnchor` while the collect job also reads `LocalToWorld`; Entities
+  refuses to schedule an `IJobEntity` over a custom query narrower than the job and throws
+  `InvalidOperationException` from inside the group update — logged, swallowed by the group, buffer
+  left empty. No test exercised the system until this branch's `ViewOverlayConsumerTests`, which
+  found it in the first EditMode run. The query now names `LocalToWorld`.
 - **No stale markers, either feed.** `MinimapDataSystem` requires only its buffer singleton, never a
   non-empty query, so the frame the last marked entity disappears is the frame the buffer reads
   zero. **`ViewOverlaySystem` had exactly the stale-entry bug this rule prevents:** it required at
