@@ -14,6 +14,7 @@ com.cuvara.dots
 ├── Runtime.GameLogic/    Shared.GameLogic bridge (opt-in)
 ├── Runtime.GameFoundation/  GDK integration (opt-in)
 ├── Runtime.DI/           VContainer registration (opt-in)
+├── Runtime.Physics/      Unity.Physics helpers (opt-in; no event collector — see SUPPORT-MATRIX)
 └── Editor/               Editor tooling
 ```
 
@@ -37,10 +38,18 @@ assets are released. Keys shared with other chunks survive.
 
 ### Netcode adapter
 
-With `com.cuvara.netcode` >= 0.19.0 installed, `DotsNetcodeBootstrap.Install` creates
+With `com.cuvara.netcode` >= 0.31.0 installed, `DotsNetcodeBootstrap.Install` creates
 a `DotsEntityView` that implements `IEntityView`. Server snapshots become ECS entities
 with `NetworkEntity`, `NetworkEntityState`, `ReconciliationAnchor`, and optionally a
-`SnapshotSample` buffer for remote interpolation.
+`SnapshotSample` buffer for remote interpolation. Presence is reported through
+`NetworkEntitySpawned`/`NetworkEntityDespawned` on `view.Lifecycle` (`NETWORK-LIFECYCLE.md`).
+
+### What is and is not here
+
+Not every type in the tree is a working feature. `SUPPORT-MATRIX.md` classifies each one
+(implemented / integrated in client / sample-only / data-contract-only / planned) and records
+the tested configurations and platforms. Read it before depending on minimap, physics events,
+camera follow or 2D sorting.
 
 ### Simulation model
 
@@ -66,6 +75,6 @@ Order your own systems against these groups, never against the internal systems.
 | `com.unity.burst` | 1.8.30 | Yes |
 | `com.unity.collections` | 2.6.8 | Yes |
 | `com.unity.mathematics` | 1.3.2 | Yes |
-| `com.cuvara.netcode` | >= 0.19.0 | Optional |
+| `com.cuvara.netcode` | >= 0.31.0 | Optional |
 | `com.rpgmmo.shared-gamelogic` | any | Optional |
 | VContainer | any | Optional |

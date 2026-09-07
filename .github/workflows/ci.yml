@@ -154,7 +154,7 @@ jobs:
               "com.unity.burst": "1.8.30",
               "com.unity.collections": "2.6.8",
               "com.unity.mathematics": "1.3.2",
-              "com.rpgmmo.shared-gamelogic": "https://github.com/Cuvara/rpg-mmo-server.git?path=/backend/gameserver-dotnet/Shared.GameLogic#sgl-v0.2.2"
+              "com.rpgmmo.shared-gamelogic": "https://github.com/Cuvara/rpg-mmo-server.git?path=/backend/gameserver-dotnet/Shared.GameLogic#sgl-v0.3.0"
             },
             "testables": ["com.cuvara.dots"]
           }
@@ -290,12 +290,12 @@ jobs:
           {
             "dependencies": {
               "com.cuvara.dots": "file:../package",
-              "com.cuvara.netcode": "https://github.com/Cuvara/Netcode.git#v0.19.0",
+              "com.cuvara.netcode": "https://github.com/Cuvara/Netcode.git#v0.31.0",
               "com.unity.entities": "1.4.8",
               "com.unity.burst": "1.8.30",
               "com.unity.collections": "2.6.8",
               "com.unity.mathematics": "1.3.2",
-              "com.rpgmmo.shared-gamelogic": "https://github.com/Cuvara/rpg-mmo-server.git?path=/backend/gameserver-dotnet/Shared.GameLogic#sgl-v0.2.2"
+              "com.rpgmmo.shared-gamelogic": "https://github.com/Cuvara/rpg-mmo-server.git?path=/backend/gameserver-dotnet/Shared.GameLogic#sgl-v0.3.0"
             },
             "scopedRegistries": [
               {

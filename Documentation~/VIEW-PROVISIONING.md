@@ -65,13 +65,15 @@ The interface the spawn system calls. Two implementations ship:
 
 | Implementation | Source | When to use |
 |----------------|--------|-------------|
-| `PrimitiveViewAssetProvider` | `Runtime/` | Dev/test — creates Unity primitives |
-| GameFoundation provider | `Runtime.GameFoundation/` | Production — uses `IAssetsManager` + `IObjectPoolManager` |
+| `PooledViewAssetProvider` | `Runtime/Provisioning/` | Package-owned SetActive pool over prefabs you register. Identity/ownership fixes in progress on `feat/pool-chunk` (D02). |
+| `PrimitiveViewAssetProvider` | `Samples~/HybridViews/` (**sample-only**; a second copy, `PrimitiveViewProvider`, in `Samples~/NetworkedPrediction/`) | Dev/test — creates Unity primitives |
+| `GameFoundationViewAssetProvider` | `Runtime.GameFoundation/` | UniT `IAssetsManager` + `IObjectPoolManager`. Compile-checked only; no test exercises it. |
 
-Implement your own if you have a different pool or asset system.
+Implement your own if you have a different pool or asset system — the client project does.
 
 ## Sorting keys
 
-`ViewSortingKey` controls draw order within a chunk. Entities with a lower sorting
-key are spawned first and rendered underneath. The key is stable across pool
-recycles — a returned-and-reacquired instance keeps its draw position.
+`ViewSortingKey` is **carried, not applied**. `EntityViewSpawnSystem` copies a config's
+sorting layer/order onto the entity and nothing in the package writes it to a
+`SpriteRenderer` — the 2D branch is a planned item. Treat the component as authoring data
+until `SUPPORT-MATRIX.md` says otherwise.

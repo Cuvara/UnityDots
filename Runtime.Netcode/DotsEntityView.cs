@@ -100,17 +100,32 @@ namespace Cuvara.DOTS.Netcode
         /// lets a client-side system destroy the mirror of an entity the server still lists — see
         /// <see cref="NetworkEntityState"/>. <see cref="NetworkEntityState"/> is written either way.
         /// </param>
+        /// <param name="lifecycle">
+        /// Where <see cref="NetworkEntitySpawned"/> / <see cref="NetworkEntityDespawned"/> are
+        /// delivered. Null creates a private one, reachable through <see cref="Lifecycle"/>. Pass the
+        /// container's instance when <c>Cuvara.DOTS.DI</c> registered one, so MessagePipe forwarding
+        /// and direct subscribers see the same events.
+        /// </param>
         public DotsEntityView(
             ViewConfigCatalog catalog,
             INetworkArchetypeResolver resolver,
             SnapshotSpaceMapping mapping = default,
-            bool writeHealth = false)
+            bool writeHealth = false,
+            NetworkEntityLifecycle lifecycle = null)
         {
             _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
             _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
             _mapping = mapping.IsPopulated ? mapping : SnapshotSpaceMapping.XZPlane;
             _writeHealth = writeHealth;
+            Lifecycle = lifecycle ?? new NetworkEntityLifecycle();
         }
+
+        /// <summary>
+        /// Network presence events for this session. Published by the drain, on the drain's thread,
+        /// exactly once per spawn and once per despawn of each id. See
+        /// <see cref="NetworkEntityLifecycle"/> for ordering, error isolation and teardown.
+        /// </summary>
+        public NetworkEntityLifecycle Lifecycle { get; }
 
         /// <summary>Ids this view believes are present. Counts enqueues, not applied entities.</summary>
         public int Count => _live.Count;

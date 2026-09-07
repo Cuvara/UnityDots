@@ -161,16 +161,48 @@ namespace Cuvara.DOTS.Netcode
         }
 
         /// <summary>
-        /// Removes the singleton. Safe on a world that never had one, and does not destroy the
-        /// mirrored entities — those belong to the world, and a consumer tearing down a session
+        /// Removes the singleton. Safe on a world that never had one. By default it does not destroy
+        /// the mirrored entities — those belong to the world, and a consumer tearing down a session
         /// usually disposes the world itself.
         /// </summary>
-        public static void Uninstall(World world)
+        /// <param name="world">The world the adapter was installed into.</param>
+        /// <param name="destroyMirrors">
+        /// Also end every present life: publish one <see cref="NetworkEntityDespawned"/> with
+        /// <see cref="NetworkDespawnReason.Teardown"/> per id the drain still holds, destroy those
+        /// mirror entities, and empty the drain's map. <b>False by default</b>, which is 0.27.1's
+        /// behaviour exactly: no events, no destruction, entities left for the world's disposal.
+        /// </param>
+        /// <remarks>
+        /// <para>
+        /// <b>Two ways to end a session, one event each.</b> Ticking <c>WorldViewBinder.Reset</c>
+        /// through the drain despawns every id in the binder's order with reason
+        /// <see cref="NetworkDespawnReason.Despawned"/>; calling this with
+        /// <paramref name="destroyMirrors"/> despawns whatever is still mapped with reason
+        /// <see cref="NetworkDespawnReason.Teardown"/>. Doing both is safe: the second finds an empty
+        /// map and publishes nothing. A <c>Despawn</c> the binder enqueued but nothing drained is
+        /// equally silent afterwards, because the singleton is gone and the drain no longer updates.
+        /// </para>
+        /// <para>
+        /// Events are published to the <see cref="DotsEntityView.Lifecycle"/> of the view currently
+        /// installed. With no view installed there is nobody to publish to, and the mirrors are
+        /// destroyed silently.
+        /// </para>
+        /// </remarks>
+        public static void Uninstall(World world, bool destroyMirrors = false)
         {
             if (world == null || !world.IsCreated) return;
 
             var entityManager = world.EntityManager;
             using var query = entityManager.CreateEntityQuery(ComponentType.ReadWrite<NetworkEntityViewReference>());
+
+            if (destroyMirrors)
+            {
+                var view = query.IsEmpty
+                    ? null
+                    : entityManager.GetComponentObject<NetworkEntityViewReference>(query.GetSingletonEntity()).View;
+                DestroyMirrors(world, view);
+            }
+
             if (!query.IsEmpty) entityManager.DestroyEntity(query.GetSingletonEntity());
 
             // The interpolation singletons go with it: they are this assembly's, and leaving a
@@ -178,6 +210,30 @@ namespace Cuvara.DOTS.Netcode
             // timeline nothing feeds.
             using var interpolation = entityManager.CreateEntityQuery(ComponentType.ReadWrite<InterpolationSettings>());
             if (!interpolation.IsEmpty) entityManager.DestroyEntity(interpolation.GetSingletonEntity());
+        }
+
+        /// <summary>
+        /// Ends every present life through the drain's own map — see
+        /// <c>NetworkViewCommandSystem.Teardown</c> — then destroys any <see cref="NetworkEntity"/>
+        /// the drain did not know about (a consumer-created mirror), silently.
+        /// </summary>
+        private static void DestroyMirrors(World world, DotsEntityView view)
+        {
+            var entityManager = world.EntityManager;
+
+            var handle = world.GetExistingSystem<NetworkViewCommandSystem>();
+            if (handle != SystemHandle.Null)
+            {
+                // A lifecycle to publish to, even when no view is installed: the drain's Teardown
+                // is where the map is emptied, and it needs a non-null target. A fresh hub with no
+                // observers makes it a pure clear.
+                var lifecycle = view != null ? view.Lifecycle : new NetworkEntityLifecycle();
+                ref var drain = ref world.Unmanaged.GetUnsafeSystemRef<NetworkViewCommandSystem>(handle);
+                drain.Teardown(entityManager, lifecycle);
+            }
+
+            using var mirrors = entityManager.CreateEntityQuery(ComponentType.ReadOnly<NetworkEntity>());
+            if (!mirrors.IsEmpty) entityManager.DestroyEntity(mirrors);
         }
     }
 }
