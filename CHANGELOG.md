@@ -523,9 +523,9 @@ despawn per life of a replicated id**. Contract: `Documentation~/NETWORK-LIFECYC
 
 ### Added
 
-- PooledViewAssetProvider — SetActive pooling for views (12 tests)
-- EntityArchetypePreset + ArchetypeFactory — reusable component presets (8 tests)
-- CameraFollowSystem — smooth damp camera follow
+- PooledViewAssetProvider â€” SetActive pooling for views (12 tests)
+- EntityArchetypePreset + ArchetypeFactory â€” reusable component presets (8 tests)
+- CameraFollowSystem â€” smooth damp camera follow
 - NetworkEntitySpawned/Despawned lifecycle events
 - MinimapEntry + MinimapBuffer for minimap rendering
 
@@ -534,7 +534,7 @@ despawn per life of a replicated id**. Contract: `Documentation~/NETWORK-LIFECYC
 ### Added
 
 - **Runtime.Physics** assembly now included (was missing from v0.26.0 release).
-- **ViewOverlayAnchorTests** — 5 tests for overlay data structures.
+- **ViewOverlayAnchorTests** â€” 5 tests for overlay data structures.
 
 ## [0.26.0] - 2026-09-06
 
