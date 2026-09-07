@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<engine:UXML
+    xmlns:engine="UnityEngine.UIElements"
+    xmlns:editor="UnityEditor.UIElements"
+    xsi="http://www.w3.org/2001/XMLSchema-instance"
+    engine="UnityEngine.UIElements"
+    noNamespaceSchemaLocation="../../../UIElementsSchema/UIElements.xsd">
+
+    <!-- The stylesheet has to be linked here. A UXML full of class names with no Style
+         element compiles, renders, and shows every element unstyled - the scene "works"
+         while looking broken, which is harder to diagnose than a hard failure. -->
+    <engine:Style src="PhaseB.uss" />
+
+    <engine:VisualElement name="screen" class="screen" picking-mode="Ignore">
+
+        <engine:VisualElement name="hud" class="hud">
+            <engine:Label class="title" text="Modules &amp; Config - D04 / D05" />
+            <engine:ScrollView name="content" class="content">
+            <engine:Label class="section" text="Two worlds, independent registries" />
+            <engine:VisualElement class="row">
+                <engine:Button name="install-a" text="Install in A" />
+                <engine:Button name="install-b" text="Install in B" />
+                <engine:Button name="uninstall-a" text="UninstallAll A" />
+                <engine:Button name="uninstall-b" text="UninstallAll B" />
+                <engine:Button name="scope-conflict" text="Re-install under another scope" />
+            </engine:VisualElement>
+            <engine:Label class="section" text="System order" />
+            <engine:VisualElement class="row">
+                <engine:Button name="verify-order" text="SystemOrderVerifier.Verify" />
+            </engine:VisualElement>
+            <engine:Label class="section" text="Config validation" />
+            <engine:VisualElement class="row">
+                <engine:Button name="validate-valid" text="Validate valid library" />
+                <engine:Button name="validate-broken" text="Validate broken library" />
+            </engine:VisualElement>
+            <engine:Label class="section" text="Catalog and refs" />
+            <engine:VisualElement class="row">
+                <engine:Button name="build-catalog" text="Build catalog" />
+                <engine:Button name="issue-ref" text="Issue ref" />
+                <engine:Button name="rebuild-catalog" text="Rebuild (bumps Version)" />
+                <engine:Button name="check-ref" text="Check held ref" />
+            </engine:VisualElement>
+            <engine:Label name="state" class="mono" text="" />
+            <engine:Label name="report" class="report" text="" />
+            <engine:Label name="log" class="log" text="" />
+            </engine:ScrollView>
+        </engine:VisualElement>
+
+    </engine:VisualElement>
+
+</engine:UXML>

@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`Samples~/PhaseBShowcase` — four scenes for the D01–D14 improvement plan.** v0.28.0 shipped the
+  whole plan with unit tests and code-only samples but no scene, so none of it could be watched
+  working. Registered in `package.json` as **Phase B Showcase**. Every scene runs offline: no
+  backend, no gateway, no netcode connection — the snapshot, chunk and collision sequences are all
+  scripted local calls. UI is UI Toolkit throughout (UXML + USS + one `PanelSettings`), and each
+  scene is a camera, a light and one bootstrap `MonoBehaviour` with a `UIDocument`.
+  - `Scenes/PoolAndChunks.unity` (D02/D03) — `PooledViewAssetProvider` and `ChunkViewProvisioner`
+    with every accounting path on a button and every counter on screen: duplicate release, foreign
+    release, external destruction plus `SweepDestroyed`, `maxActivePerKey` rejection, both
+    `OutstandingLeasePolicy` values, chunk warm/release, release-while-warming, two chunks sharing a
+    key, and repeated cycles returning to baseline.
+  - `Scenes/ModulesAndConfig.unity` (D04/D05) — install and uninstall twice, two Worlds with
+    independent registries, the scope-change refusal, `SystemOrderVerifier` output, a
+    `ViewConfigValidator` report over a deliberately broken library beside a valid one, and a
+    catalog rebuild bumping `Version` so a held `ViewConfigRef` is refused.
+  - `Scenes/LifecycleEventsAndMinimap.unity` (D06/D08/D09) — a scripted wire sequence through
+    `DotsEntityView` (full → delta → AOI exit → re-entry → `BeginGeneration` reset → external
+    destruction → teardown) against the `NetworkEntityLifecycle` log, with the `MinimapBootstrap`
+    buffer drawn as a UI Toolkit minimap, `ViewOverlayReconciler` name plates, and camera-follow
+    buttons for no target, two targets, switching, teleport and `ResetSmoothing`.
+  - `Scenes/PhysicsEvents.unity` (D07) — `ColliderLibrary` bodies, `PhysicsEventsBootstrap`
+    installed through `DotsModules`, the Enter/Stay/Exit stream with canonical pair ordering and
+    aggregated contact counts, destruction mid-contact showing entity index reuse, install/uninstall
+    cycles returning collider blobs and leases to zero, and the one-integrator guard tripped and
+    restored.
+  - Gating matches the runtime assemblies exactly: `…PhaseBShowcase.Netcode` carries the
+    `com.cuvara.netcode` `versionDefine` with a `CUVARA_NETCODE` constraint and
+    `…PhaseBShowcase.Physics` the `com.unity.physics` / `CUVARA_DOTS_PHYSICS` pair, so the sample
+    imports inert in a project without either package.
+
 ## [0.28.0] - 2026-09-07
 
 ### Minimap producer, overlay consumer contract, 2D sorting decision (D08)

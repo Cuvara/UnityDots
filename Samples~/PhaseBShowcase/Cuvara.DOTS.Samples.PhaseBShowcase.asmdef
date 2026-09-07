@@ -1,0 +1,21 @@
+{
+    "name": "Cuvara.DOTS.Samples.PhaseBShowcase",
+    "rootNamespace": "Cuvara.DOTS.Samples.PhaseBShowcase",
+    "references": [
+        "Cuvara.DOTS.Runtime",
+        "Unity.Entities",
+        "Unity.Burst",
+        "Unity.Collections",
+        "Unity.Mathematics",
+        "Unity.Transforms"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
