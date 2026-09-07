@@ -191,7 +191,7 @@ disposed session leaves no stale `World` reference behind:
 ```csharp
 DotsViewBootstrap.Install(world, registry);                       // Root by default
 DotsSimulationBootstrap.InstallSimulationSystems(world);          // Root by default
-CameraFollowBootstrap.Install(world, new CameraFollowConfig());   // Session; validates the config
+CameraFollowBootstrap.Install(world, new CameraFollowConfig());   // Session; validates the config — Documentation~/CAMERA-FOLLOW.md
 PhysicsMovementBootstrap.Install(world);                          // Session; Runtime.Physics only
 
 DotsModules.UninstallScope(world, DotsModuleScope.Session);       // scene reload

@@ -101,6 +101,8 @@ namespace Cuvara.DOTS.Views
                 forceSnap,
                 SystemAPI.Time.DeltaTime);
 
+            if (pose.Held) return;
+
             camera.transform.position = pose.Position;
             camera.transform.LookAt((Vector3)pose.LookAt, Vector3.up);
         }
