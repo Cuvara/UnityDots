@@ -207,7 +207,7 @@ namespace Cuvara.DOTS.Netcode
             entityManager.AddComponentData(entity, new EntityViewRequest { ViewKey = command.ViewKey });
             if (command.ConfigIndex >= 0)
             {
-                entityManager.AddComponentData(entity, new ViewConfigRef { Index = command.ConfigIndex });
+                entityManager.AddComponentData(entity, new ViewConfigRef { Index = command.ConfigIndex, Version = command.ConfigVersion });
             }
 
 #if UNITY_EDITOR

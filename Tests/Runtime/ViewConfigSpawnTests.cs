@@ -74,7 +74,7 @@ namespace Cuvara.DOTS.Tests
         {
             var entity = CreateEntity(float3.zero);
             _entityManager.AddComponentData(entity, new EntityViewRequest { ViewKey = "ignored-key" });
-            _entityManager.AddComponentData(entity, new ViewConfigRef { Index = _catalog.IndexOf("goblin") });
+            _entityManager.AddComponentData(entity, _catalog.CreateRef(_catalog.IndexOf("goblin")));
 
             Tick();
 
@@ -89,7 +89,7 @@ namespace Cuvara.DOTS.Tests
             // sync, which looks like the offset silently not working.
             var entity = CreateEntity(new float3(5f, 0f, 0f));
             _entityManager.AddComponentData(entity, new EntityViewRequest { ViewKey = "goblin" });
-            _entityManager.AddComponentData(entity, new ViewConfigRef { Index = _catalog.IndexOf("goblin") });
+            _entityManager.AddComponentData(entity, _catalog.CreateRef(_catalog.IndexOf("goblin")));
 
             Tick();
 
@@ -108,7 +108,7 @@ namespace Cuvara.DOTS.Tests
         {
             var entity = CreateEntity(float3.zero);
             _entityManager.AddComponentData(entity, new EntityViewRequest { ViewKey = "goblin" });
-            _entityManager.AddComponentData(entity, new ViewConfigRef { Index = _catalog.IndexOf("goblin") });
+            _entityManager.AddComponentData(entity, _catalog.CreateRef(_catalog.IndexOf("goblin")));
 
             Tick();
 
@@ -141,7 +141,8 @@ namespace Cuvara.DOTS.Tests
 
             var entity = CreateEntity(float3.zero);
             _entityManager.AddComponentData(entity, new EntityViewRequest { ViewKey = "torch" });
-            _entityManager.AddComponentData(entity, new ViewConfigRef { Index = 99 });
+            // Stamped with the live version so it is the RANGE check that fires, not the version one.
+            _entityManager.AddComponentData(entity, new ViewConfigRef { Index = 99, Version = _catalog.Version });
 
             Tick();
 

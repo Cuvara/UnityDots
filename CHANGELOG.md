@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Module lifecycle (D04).** `Cuvara.DOTS.Modules`: `DotsModules` records every installed module
+  in the world (`DotsModuleRecord` entity, `DotsModuleScope.Root`/`Session`, uninstaller,
+  install count) — no static table, so a disposed world leaves no stale reference.
+  `UninstallScope`/`UninstallAll` tear modules down in reverse install order; two worlds keep
+  separate records. `RequireSingleton`/`RequireSystem`/`RequireFinite`/`RequireAtLeast` produce
+  actionable precondition errors.
+- **`SystemOrderVerifier`** walks the three Unity root groups recursively and reports every
+  `[UpdateInGroup]`/`[UpdateAfter]`/`[UpdateBefore]` the actual master update list violates
+  (wrong group, unsorted group, broken `OrderFirst`/`OrderLast`). `MembersInUpdateOrder` and
+  `Contains` for tests.
+- **`CameraFollowBootstrap`** — install/uninstall for the camera module; validates
+  `CameraFollowConfig` (finite offsets, `SmoothTime >= 0`, `MaxSpeed > 0`) before anything is
+  created; `IsInstalled`; replacing the config swaps the referenced instance.
+- **`PhysicsMovementBootstrap`** (`Runtime.Physics`) — install/uninstall for
+  `PhysicsMovementBridge`; warns, or throws with `requirePhysicsPipeline: true`, when the world
+  has no `PhysicsSystemGroup`.
+- **`DotsSimulationBootstrap.Uninstall`/`IsInstalled`**, and a `scope` parameter on install.
+- **`DotsViewBootstrap.IsInstalled`/`InstalledRegistry`**, and a `scope` parameter on `Install`.
+- **Configuration validation (D05).** `ViewConfigValidator` (`ValidateLibrary`, `ValidateConfig`,
+  `ValidateMappings`, `ValidatePreset`), `ViewConfigIssue` with stable codes,
+  `ViewConfigValidationReport`, `ViewConfigValidationException`. Catches empty/duplicate/overlong
+  keys (61 UTF-8 bytes), missing prefabs via a caller-supplied lookup, non-finite values, unknown
+  entity-type mappings and invalid preset values at runtime, before gameplay.
+- **`ViewConfigCatalog.TryBuild`/`BuildOrThrow`** gate a build on the report; a refused build
+  leaves the previous table installed. `Version`, `CreateRef`/`TryCreateRef`, `Uninstall`,
+  `IsInstalled`, `InstalledWorldCount`, `ViewKeys`.
+- **`ViewConfigRef.Version` / `ViewConfigTable.Version`.** The spawn path refuses a ref whose
+  version differs from the installed table's (including unstamped `new ViewConfigRef` — version 0)
+  and falls back to the request key with a warning naming the rebuild. An old index can no longer
+  resolve to a different view.
+- `NetworkViewCommand.ConfigVersion`; `DotsEntityView` stamps it and drops its name→index cache
+  when the catalog version changes.
+- `Documentation~/MODULE-LIFECYCLE.md`, `Documentation~/CONFIG-VALIDATION.md` (incl. the prefab
+  replacement contract for providers).
+- Tests: `DotsModulesTests`, `SystemOrderVerifierTests`, `DotsViewBootstrapLifecycleTests`,
+  `CameraFollowBootstrapTests`, `DotsSimulationBootstrapTests`, `ViewConfigValidatorTests`,
+  `ViewConfigCatalogVersionTests`, extended `ArchetypeFactoryTests`; new
+  `Tests/Editor.Physics` assembly with `PhysicsMovementBootstrapTests` (gated on
+  `com.unity.physics`).
+
+### Changed
+
+- **`DotsViewBootstrap.Uninstall`** now hands every linked entity its `EntityViewRequest` back
+  (and strips `EntityViewLink`/`ViewTransformOffset`/`ViewSortingKey`/`EntityViewLinkCleanup`)
+  so a reinstall respawns them; **`Install` with a different registry** does the same before
+  swapping, so no entity keeps a handle into a replaced registry and no view exists twice.
+- **`ViewConfigCatalog.Build`** re-publishes the new blob into every world the catalog is
+  installed in, so no singleton points at the freed previous blob; `Dispose` removes the
+  singleton from those worlds.
+- `CameraFollowSystem` reports (once) and skips when the number of `CameraFollowTarget` entities
+  is not exactly one, instead of throwing from `GetSingleton` every frame.
+- `ViewOverlaySystem.OnDestroy` completes its dependency before disposing the overlay list and
+  nulls the list on the buffer so disposal is observable.
+- `ArchetypeFactory.Create`/`CreateBatch` throw on a null preset or uncreated containers.
+- README: view-configuration snippet uses `catalog.CreateRef`; system-group tree lists
+  `ViewOverlaySystem` and `CameraFollowSystem`; new "Modules" section.
+
+### Migration
+
+- Replace `new ViewConfigRef { Index = i }` with `catalog.CreateRef(i)` (or `TryCreateRef(name)`).
+  Unstamped refs are refused and fall back to the request's own key, with a warning.
+- Optional: install the camera through `CameraFollowBootstrap.Install` instead of creating
+  `CameraFollowSystem` and its singleton by hand.
+
 ## [0.27.1] - 2026-09-06
 
 ### Fixed

@@ -8,7 +8,8 @@ replicated server entities as ECS entities.
 
 ```
 com.cuvara.dots
-├── Runtime/              Core: views, provisioning, simulation, system groups
+├── Runtime/              Core: views, provisioning, simulation, system groups, modules, config validation
+├── Runtime.Physics/      Unity.Physics helpers + PhysicsMovementBootstrap (opt-in, requires com.unity.physics)
 ├── Runtime.Netcode/      IEntityView over ECS (opt-in, requires com.cuvara.netcode)
 ├── Runtime.Netcode.Prediction/  Client-side prediction systems
 ├── Runtime.GameLogic/    Shared.GameLogic bridge (opt-in)
@@ -57,6 +58,12 @@ See the system group tree in `README.md`. Key ordering:
 3. `ViewSystemGroup` (PresentationSystemGroup) — interpolation, spawn/despawn, transform sync
 
 Order your own systems against these groups, never against the internal systems.
+
+## Modules and configuration
+
+Every optional piece installs through a bootstrap with `Install`/`Uninstall` and a recorded
+owner scope — `MODULE-LIFECYCLE.md`. Configuration is validated at runtime and the catalog is
+versioned so a rebuild can never swap a view silently — `CONFIG-VALIDATION.md`.
 
 ## Dependencies
 

@@ -125,20 +125,28 @@ server uses. At session start, build the catalog and publish it:
 
 ```csharp
 var catalog = new ViewConfigCatalog();
-catalog.Build(library);
+catalog.BuildOrThrow(library);       // validates first — see Documentation~/CONFIG-VALIDATION.md
 catalog.Install(world);              // publishes ViewConfigTableReference
 
 // Warm what the catalog needs, using its own pool sizes:
 foreach (var (key, size) in catalog.PoolSizesByKey())
     await provisioner.PrewarmChunkAsync("chunk-12-4", new[] { key }, countPerKey: size);
 
-// Spawn by archetype name — resolve once, carry the index:
+// Spawn by archetype name — resolve once, carry a versioned ref issued by the catalog:
 entityManager.AddComponentData(entity, new EntityViewRequest { ViewKey = "goblin" });
-entityManager.AddComponentData(entity, new ViewConfigRef { Index = catalog.IndexOf("goblin") });
+entityManager.AddComponentData(entity, catalog.CreateRef(catalog.IndexOf("goblin")));
 ```
 
 The bare-key path still works exactly as before: an entity with only `EntityViewRequest` and no
-`ViewConfigRef` behaves as it always did. `catalog.Dispose()` releases the blob.
+`ViewConfigRef` behaves as it always did. `catalog.Dispose()` releases the blob and removes the
+singleton from every world it was installed in.
+
+A `ViewConfigRef` is **versioned**: every `catalog.Build` bumps `catalog.Version`, and a ref from
+an earlier version is refused by the spawn path (falling back to the request's own key) rather than
+resolving to whatever now sits at that index. Never construct one with `new` — it carries version 0
+and is always refused. Validation (`ViewConfigValidator`, `catalog.TryBuild`) reports empty,
+duplicate or overlong keys, missing prefabs, non-finite values and unknown entity-type mappings
+before gameplay; `Documentation~/CONFIG-VALIDATION.md` has the full contract.
 
 ## System groups
 
@@ -163,11 +171,35 @@ PresentationSystemGroup                       [Unity]
     ├── ViewLifecycleGroup                    structural: views appear/disappear
     │   ├── EntityViewDespawnSystem           first — freed instances reusable this frame
     │   └── EntityViewSpawnSystem             UpdateAfter(EntityViewDespawnSystem)
-    └── ViewTransformSyncGroup                UpdateAfter(ViewLifecycleGroup)
-        └── EntityViewTransformSyncSystem
+    ├── ViewTransformSyncGroup                UpdateAfter(ViewLifecycleGroup)
+    │   ├── EntityViewTransformSyncSystem
+    │   └── ViewOverlaySystem                 UpdateAfter(EntityViewTransformSyncSystem)
+    └── CameraFollowSystem                    UpdateAfter(ViewTransformSyncGroup); only with CameraFollowBootstrap
 ```
 
-Order your own systems against the groups: `[UpdateAfter(typeof(ViewSystemGroup))]`.
+Order your own systems against the groups: `[UpdateAfter(typeof(ViewSystemGroup))]`. After any
+manual install, `SystemOrderVerifier.Verify(world)` returns every declared relation the actual
+update order violates — a system added to the wrong group, a group left unsorted — recursively
+through the subgroups.
+
+## Modules: install, uninstall, ownership
+
+Each optional piece is a module with a bootstrap, an idempotent `Install`, a safe-twice
+`Uninstall`, and a recorded owner (`DotsModuleScope.Root` or `Session`) kept **in the world**, so a
+disposed session leaves no stale `World` reference behind:
+
+```csharp
+DotsViewBootstrap.Install(world, registry);                       // Root by default
+DotsSimulationBootstrap.InstallSimulationSystems(world);          // Root by default
+CameraFollowBootstrap.Install(world, new CameraFollowConfig());   // Session; validates the config
+PhysicsMovementBootstrap.Install(world);                          // Session; Runtime.Physics only
+
+DotsModules.UninstallScope(world, DotsModuleScope.Session);       // scene reload
+DotsModules.UninstallAll(world); world.Dispose();                 // permanent teardown
+```
+
+`Documentation~/MODULE-LIFECYCLE.md` states the contract line by line: install twice, uninstall
+twice, registry replacement, two worlds, temporary disable versus world disposal.
 
 ## Usage
 
