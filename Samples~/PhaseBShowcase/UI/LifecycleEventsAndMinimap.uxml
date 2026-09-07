@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<engine:UXML
+    xmlns:engine="UnityEngine.UIElements"
+    xmlns:editor="UnityEditor.UIElements"
+    xsi="http://www.w3.org/2001/XMLSchema-instance"
+    engine="UnityEngine.UIElements"
+    noNamespaceSchemaLocation="../../../UIElementsSchema/UIElements.xsd">
+
+    <!-- The stylesheet has to be linked here. A UXML full of class names with no Style
+         element compiles, renders, and shows every element unstyled - the scene "works"
+         while looking broken, which is harder to diagnose than a hard failure. -->
+    <engine:Style src="PhaseB.uss" />
+
+    <engine:VisualElement name="screen" class="screen" picking-mode="Ignore">
+
+        <engine:VisualElement name="hud" class="hud">
+            <engine:Label class="title" text="Lifecycle, Minimap &amp; Overlay - D06 / D08 / D09" />
+            <engine:ScrollView name="content" class="content">
+            <engine:Label class="section" text="Scripted snapshot sequence (no backend)" />
+            <engine:VisualElement class="row">
+                <engine:Button name="full" text="Full snapshot" />
+                <engine:Button name="delta" text="Delta" />
+                <engine:Button name="aoi-exit" text="AOI exit uuid-b" />
+                <engine:Button name="aoi-reentry" text="AOI re-entry uuid-b" />
+                <engine:Button name="reset" text="Reconnect + BeginGeneration" />
+                <engine:Button name="external-destroy" text="Destroy mirror entity" />
+                <engine:Button name="teardown" text="Teardown" />
+                <engine:Button name="reinstall" text="Reinstall adapter" />
+                <engine:Button name="autoplay" text="Autoplay" />
+            </engine:VisualElement>
+            <engine:Label class="section" text="Camera follow" />
+            <engine:VisualElement class="row">
+                <engine:Button name="follow-me" text="Follow local" />
+                <engine:Button name="follow-a" text="Follow uuid-a" />
+                <engine:Button name="follow-none" text="No target" />
+                <engine:Button name="follow-two" text="Two targets" />
+                <engine:Button name="teleport" text="Teleport local" />
+                <engine:Button name="toggle-switch" text="Switch policy" />
+                <engine:Button name="toggle-multi" text="Multi-target policy" />
+                <engine:Button name="reset-smoothing" text="ResetSmoothing" />
+            </engine:VisualElement>
+            <engine:Label class="section" text="Log" />
+            <engine:VisualElement class="row">
+                <engine:Button name="clear-log" text="Clear log" />
+            </engine:VisualElement>
+            <engine:Label name="counters" class="mono" text="" />
+            <engine:Label name="log" class="log" text="" />
+            </engine:ScrollView>
+        </engine:VisualElement>
+
+        <!-- Name plates are positioned in code by ViewOverlayReconciler; the layer must
+             not swallow clicks meant for the HUD underneath it. -->
+        <engine:VisualElement name="plates" class="plates" picking-mode="Ignore" />
+        <engine:VisualElement name="minimap" class="minimap" picking-mode="Ignore" />
+        <engine:Label class="minimap-title" text="minimap (local player centred)" />
+
+    </engine:VisualElement>
+
+</engine:UXML>

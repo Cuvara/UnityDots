@@ -1,0 +1,32 @@
+{
+    "name": "Cuvara.DOTS.Samples.PhaseBShowcase.Physics",
+    "rootNamespace": "Cuvara.DOTS.Samples.PhaseBShowcase",
+    "references": [
+        "Cuvara.DOTS.Runtime",
+        "Cuvara.DOTS.Physics",
+        "Cuvara.DOTS.Samples.PhaseBShowcase",
+        "Unity.Entities",
+        "Unity.Burst",
+        "Unity.Collections",
+        "Unity.Mathematics",
+        "Unity.Transforms",
+        "Unity.Physics"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "CUVARA_DOTS_PHYSICS"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.unity.physics",
+            "expression": "1.0.0",
+            "define": "CUVARA_DOTS_PHYSICS"
+        }
+    ],
+    "noEngineReferences": false
+}

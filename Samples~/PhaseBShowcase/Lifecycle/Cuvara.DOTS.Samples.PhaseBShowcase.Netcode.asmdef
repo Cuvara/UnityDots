@@ -1,0 +1,31 @@
+{
+    "name": "Cuvara.DOTS.Samples.PhaseBShowcase.Netcode",
+    "rootNamespace": "Cuvara.DOTS.Samples.PhaseBShowcase",
+    "references": [
+        "Cuvara.DOTS.Runtime",
+        "Cuvara.DOTS.Netcode",
+        "Cuvara.Netcode.Runtime",
+        "Cuvara.DOTS.Samples.PhaseBShowcase",
+        "Unity.Entities",
+        "Unity.Collections",
+        "Unity.Mathematics",
+        "Unity.Transforms"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "CUVARA_NETCODE"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.cuvara.netcode",
+            "expression": "0.31.0",
+            "define": "CUVARA_NETCODE"
+        }
+    ],
+    "noEngineReferences": false
+}

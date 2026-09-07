@@ -38,6 +38,11 @@
       "displayName": "Stress Benchmark",
       "description": "Pure DOTS and hybrid entity stress benchmark. Measures simulation + Unity.Physics throughput at 100 to 100M entities. Two modes: pure ECS (no views) and hybrid (pooled GameObjects). Command-line activated via -stress-pure or -stress-hybrid.",
       "path": "Samples~/StressBenchmark"
+    },
+    {
+      "displayName": "Phase B Showcase",
+      "description": "Four offline scenes demonstrating the v0.28.0 DOTS improvement plan: pool and chunk accounting, module lifecycle and view-config validation, the scripted network entity lifecycle with minimap and overlays, and the physics event pipeline. No backend required; the netcode and physics scenes are gated on their optional packages.",
+      "path": "Samples~/PhaseBShowcase"
     }
   ],
   "testables": [

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<engine:UXML
+    xmlns:engine="UnityEngine.UIElements"
+    xmlns:editor="UnityEditor.UIElements"
+    xsi="http://www.w3.org/2001/XMLSchema-instance"
+    engine="UnityEngine.UIElements"
+    noNamespaceSchemaLocation="../../../UIElementsSchema/UIElements.xsd">
+
+    <!-- The stylesheet has to be linked here. A UXML full of class names with no Style
+         element compiles, renders, and shows every element unstyled - the scene "works"
+         while looking broken, which is harder to diagnose than a hard failure. -->
+    <engine:Style src="PhaseB.uss" />
+
+    <engine:VisualElement name="screen" class="screen" picking-mode="Ignore">
+
+        <engine:VisualElement name="hud" class="hud">
+            <engine:Label class="title" text="Pool &amp; Chunks - D02 / D03" />
+            <engine:ScrollView name="content" class="content">
+            <engine:Label class="section" text="Acquire / release" />
+            <engine:VisualElement class="row">
+                <engine:Button name="acquire-cube" text="Acquire cube" />
+                <engine:Button name="release-cube" text="Release cube" />
+                <engine:Button name="acquire-sphere" text="Acquire sphere" />
+                <engine:Button name="release-sphere" text="Release sphere" />
+            </engine:VisualElement>
+            <engine:Label class="section" text="Accounting paths (each bumps a counter)" />
+            <engine:VisualElement class="row">
+                <engine:Button name="duplicate-release" text="Duplicate release" />
+                <engine:Button name="foreign-release" text="Foreign release" />
+                <engine:Button name="external-destroy" text="External destroy" />
+                <engine:Button name="sweep-destroyed" text="SweepDestroyed()" />
+                <engine:Button name="hit-admission-cap" text="Exceed maxActivePerKey" />
+            </engine:VisualElement>
+            <engine:Label class="section" text="Dispose policy" />
+            <engine:VisualElement class="row">
+                <engine:Button name="dispose-destroy" text="Dispose: Destroy" />
+                <engine:Button name="dispose-detach" text="Dispose: Detach" />
+            </engine:VisualElement>
+            <engine:Label class="section" text="Chunks" />
+            <engine:VisualElement class="row">
+                <engine:Button name="warm-chunk-a" text="Warm A [cube, sphere]" />
+                <engine:Button name="warm-chunk-b" text="Warm B [sphere, capsule]" />
+                <engine:Button name="release-chunk-a" text="Release A" />
+                <engine:Button name="release-chunk-b" text="Release B" />
+                <engine:Button name="release-while-warming" text="Release while warming" />
+                <engine:Button name="cycle-chunks" text="Cycle x5" />
+            </engine:VisualElement>
+            <engine:Label class="section" text="Reset" />
+            <engine:VisualElement class="row">
+                <engine:Button name="reset-all" text="Reset all" />
+            </engine:VisualElement>
+            <engine:Label name="counters" class="mono" text="" />
+            <engine:Label name="log" class="log" text="" />
+            </engine:ScrollView>
+        </engine:VisualElement>
+
+    </engine:VisualElement>
+
+</engine:UXML>

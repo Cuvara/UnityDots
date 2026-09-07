@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<engine:UXML
+    xmlns:engine="UnityEngine.UIElements"
+    xmlns:editor="UnityEditor.UIElements"
+    xsi="http://www.w3.org/2001/XMLSchema-instance"
+    engine="UnityEngine.UIElements"
+    noNamespaceSchemaLocation="../../../UIElementsSchema/UIElements.xsd">
+
+    <!-- The stylesheet has to be linked here. A UXML full of class names with no Style
+         element compiles, renders, and shows every element unstyled - the scene "works"
+         while looking broken, which is harder to diagnose than a hard failure. -->
+    <engine:Style src="PhaseB.uss" />
+
+    <engine:VisualElement name="screen" class="screen" picking-mode="Ignore">
+
+        <engine:VisualElement name="hud" class="hud">
+            <engine:Label class="title" text="Physics Events - D07" />
+            <engine:ScrollView name="content" class="content">
+            <engine:Label class="section" text="Module lifecycle" />
+            <engine:VisualElement class="row">
+                <engine:Button name="install-events" text="Install" />
+                <engine:Button name="uninstall-events" text="Uninstall scope" />
+                <engine:Button name="cycle-modules" text="Cycle x5 to baseline" />
+            </engine:VisualElement>
+            <engine:Label class="section" text="Bodies" />
+            <engine:VisualElement class="row">
+                <engine:Button name="build-stage" text="Build stage" />
+                <engine:Button name="drop-ball" text="Drop ball on box" />
+                <engine:Button name="drop-into-zone" text="Drop into trigger zone" />
+                <engine:Button name="destroy-mid-contact" text="Destroy mid-contact" />
+                <engine:Button name="clear-bodies" text="Clear bodies" />
+            </engine:VisualElement>
+            <engine:Label class="section" text="One-integrator guard" />
+            <engine:VisualElement class="row">
+                <engine:Button name="spawn-physics-mover" text="Physics-driven mover" />
+                <engine:Button name="spawn-direct-mover" text="Direct mover" />
+                <engine:Button name="check-integrators" text="Check integrators" />
+                <engine:Button name="break-guard" text="Break the guard" />
+            </engine:VisualElement>
+            <engine:Label name="state" class="mono" text="" />
+            <engine:Label name="log" class="log" text="" />
+            </engine:ScrollView>
+        </engine:VisualElement>
+
+    </engine:VisualElement>
+
+</engine:UXML>

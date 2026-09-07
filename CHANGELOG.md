@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`Samples~/PhaseBShowcase` — four scenes for the D01–D14 improvement plan.** v0.28.0 shipped the
+  whole plan with unit tests and code-only samples but no scene, so none of it could be watched
+  working. Registered in `package.json` as **Phase B Showcase**. Every scene runs offline: no
+  backend, no gateway, no netcode connection — the snapshot, chunk and collision sequences are all
+  scripted local calls. UI is UI Toolkit throughout (UXML + USS + one `PanelSettings`), and each
+  scene is a camera, a light and one bootstrap `MonoBehaviour` with a `UIDocument`.
+  - `Scenes/PoolAndChunks.unity` (D02/D03) — `PooledViewAssetProvider` and `ChunkViewProvisioner`
+    with every accounting path on a button and every counter on screen: duplicate release, foreign
+    release, external destruction plus `SweepDestroyed`, `maxActivePerKey` rejection, both
+    `OutstandingLeasePolicy` values, chunk warm/release, release-while-warming, two chunks sharing a
+    key, and repeated cycles returning to baseline.
+  - `Scenes/ModulesAndConfig.unity` (D04/D05) — install and uninstall twice, two Worlds with
+    independent registries, the scope-change refusal, `SystemOrderVerifier` output, a
+    `ViewConfigValidator` report over a deliberately broken library beside a valid one, and a
+    catalog rebuild bumping `Version` so a held `ViewConfigRef` is refused.
+  - `Scenes/LifecycleEventsAndMinimap.unity` (D06/D08/D09) — a scripted wire sequence through
+    `DotsEntityView` (full → delta → AOI exit → re-entry → `BeginGeneration` reset → external
+    destruction → teardown) against the `NetworkEntityLifecycle` log, with the `MinimapBootstrap`
+    buffer drawn as a UI Toolkit minimap, `ViewOverlayReconciler` name plates, and camera-follow
+    buttons for no target, two targets, switching, teleport and `ResetSmoothing`.
+  - `Scenes/PhysicsEvents.unity` (D07) — `ColliderLibrary` bodies, `PhysicsEventsBootstrap`
+    installed through `DotsModules`, the Enter/Stay/Exit stream with canonical pair ordering and
+    aggregated contact counts, destruction mid-contact showing entity index reuse, install/uninstall
+    cycles returning collider blobs and leases to zero, and the one-integrator guard tripped and
+    restored.
+  - **Headless self-test.** `-showcaseAutorun` (with optional `-showcaseAutorunDelay <seconds>`,
+    default 1) makes each scene drive its own buttons in a scripted order, assert the outcomes its
+    README documents, and quit with 0 when every assertion held and 1 otherwise — a headless run
+    can build a scene and read its panel, but it cannot click, so the scenarios behind the buttons
+    were the part still unproven. Steps log
+    `[PhaseB] <Scene> step=<step> expected=<label>:<value> actual=<value> PASS|FAIL` and each scene
+    ends with `[PhaseB] <Scene>: N passed, M failed`; these strings are a CI contract and are fixed.
+    Waits that depend on the physics pipeline are bounded, so a world that never steps fails the run
+    instead of hanging it. Without the flag the scenes behave exactly as they do interactively, and
+    neither mode needs a backend.
+  - **Fixes found by running the autorun headlessly**, all sample-side; no package change was
+    needed. The pool scene registered its prefabs but never prewarmed them — only `PrewarmAsync`
+    creates a key's pool queue, and `ReleaseInstance` parks an instance only when a queue exists for
+    its key, so every release destroyed the instance and dropped its lease; a second release of the
+    same instance was then counted as a *foreign* release rather than a duplicate one. The dispose
+    demo read its verdict on the same frame, but the provider destroys through `Object.Destroy`,
+    which a player defers to end of frame, so the `Destroy` policy looked identical to `Detach`; the
+    verdict is now read a frame later. The two-World scene compared world B's module count against
+    world A's, which is not a valid baseline because A also carries the Simulation module; each
+    world now has its own. The lifecycle scene asked for `Views` as `Session`-scoped, which throws
+    in the Default World whenever the host already installed it as `Root` — `Views` is `Root`-scoped
+    by design, being a service that outlives a scene, so the scene now takes the package default and
+    tears down by named module instead of by scope. The physics scene's teardown is likewise named
+    rather than a scope sweep, since the Default World is shared with the host.
+  - **The external-destruction step now sends a command after destroying the mirror.** Detection is
+    command-driven by design — the drain has no callback for an entity disappearing, so
+    `ApplySpawn` and `ApplyState` check `IsLiveMirror` when the next command for the id arrives, and
+    teardown checks it as well. The scene destroyed a mirror and then went quiet about that id, so
+    nothing ever reached a detection site and `ExternalDestruction` was never raised. It now sends
+    one more state for the id, which is also what a real server does, having no idea the client
+    destroyed anything. The package behaviour was correct and is unchanged.
+  - **A scene that throws in `Start` now fails instead of hanging.** Setup is wrapped, the component
+    disables itself rather than dereferencing nulls every frame, and under `-showcaseAutorun` it
+    reports `[PhaseB] <Scene> step=start ... FAIL` plus `[PhaseB] <Scene>: 0 passed, 1 failed` and
+    quits 1, so a broken scene fails fast in CI rather than running to the outer timeout.
+  - Gating matches the runtime assemblies exactly: `…PhaseBShowcase.Netcode` carries the
+    `com.cuvara.netcode` `versionDefine` with a `CUVARA_NETCODE` constraint and
+    `…PhaseBShowcase.Physics` the `com.unity.physics` / `CUVARA_DOTS_PHYSICS` pair, so the sample
+    imports inert in a project without either package.
+
 ## [0.28.0] - 2026-09-07
 
 ### Minimap producer, overlay consumer contract, 2D sorting decision (D08)
