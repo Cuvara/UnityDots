@@ -6,6 +6,7 @@ using Cuvara.Netcode.Interpolation;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
+using Unity.Profiling;
 using Unity.Transforms;
 
 namespace Cuvara.DOTS.Netcode
@@ -19,7 +20,18 @@ namespace Cuvara.DOTS.Netcode
     /// <b>The whole queue, every update.</b> A cap would be a frame-rate-dependent way of losing
     /// state: the commands are not independent — a spawn its state never reached is an entity at the
     /// origin — and the backlog after a keyframe is bounded by the AOI, not by anything that grows.
-    /// If the drain ever becomes a cost, the fix is fewer commands, not a partial drain.
+    /// If the drain ever becomes a cost, the fix is fewer commands, not a partial drain. Whether it
+    /// is a cost is measured, not assumed: every drain records its command count, wall time and the
+    /// age of the oldest command into <see cref="NetworkIngestionMetrics"/>, under the
+    /// <c>Cuvara.DOTS.NetworkViewCommandSystem.Drain</c> profiler marker.
+    /// </para>
+    /// <para>
+    /// <b>Generations.</b> Every command carries the <see cref="DotsEntityView.Generation"/> it was
+    /// enqueued under. A command older than the view's current generation is dropped unapplied; a
+    /// <see cref="NetworkViewCommandKind.Reset"/> tears down every mirror of the previous generation
+    /// (reason <see cref="NetworkDespawnReason.SessionReset"/>) before the first command of the new
+    /// one is applied. Thread rule: this system is the only consumer of the queue, and it runs on
+    /// the world's main thread; the view's producer thread is latched on its side.
     /// </para>
     /// <para>
     /// <b>The id → <see cref="Entity"/> map lives here, not on the view.</b> The view runs on the
@@ -100,7 +112,12 @@ namespace Cuvara.DOTS.Netcode
             public bool IsLocal;
         }
 
+        private static readonly ProfilerMarker DrainMarker = new ProfilerMarker("Cuvara.DOTS.NetworkViewCommandSystem.Drain");
+
         private NativeHashMap<FixedString64Bytes, Mirror> _entities;
+
+        /// <summary>Generation the mirrors in <see cref="_entities"/> belong to; 0 until the first command.</summary>
+        private int _generation;
 
         public void OnCreate(ref SystemState state)
         {
@@ -125,6 +142,12 @@ namespace Cuvara.DOTS.Netcode
             var mapping = view.Mapping;
             var writeHealth = view.WritesHealth;
             var lifecycle = view.Lifecycle;
+            var metrics = view.Metrics;
+
+            // Read once per drain. A BeginGeneration that lands mid-drain stamps its commands with
+            // the newer number; they are applied after this drain's reset check, which is correct
+            // because they were enqueued after everything already dequeued.
+            var currentGeneration = view.Generation;
 
             // The render clock is read once, mutated in place across the whole drain and written
             // back once. Reading and writing the singleton per command would be a chunk lookup per
@@ -141,23 +164,52 @@ namespace Cuvara.DOTS.Netcode
                 timeline = SystemAPI.GetSingleton<InterpolationTimeline>();
             }
 
-            while (view.TryDequeue(out var command))
+            using (DrainMarker.Auto())
             {
-                switch (command.Kind)
+                var started = NetworkIngestionMetrics.Now;
+                var count = 0;
+                var oldestAge = 0.0;
+
+                while (view.TryDequeue(out var command))
                 {
-                    case NetworkViewCommandKind.Spawn:
-                        ApplySpawn(entityManager, mapping, lifecycle, command);
-                        break;
+                    // The first command out is the oldest in; its wait is the queue's worst latency.
+                    if (count == 0) oldestAge = started - command.EnqueueTime;
+                    count++;
 
-                    case NetworkViewCommandKind.State:
-                        ApplyState(entityManager, mapping, writeHealth, lifecycle, command,
-                                   settings.Config, ref timeline.Clock, timed);
-                        break;
+                    // Older than the view's current generation: the session it belonged to has been
+                    // reset. Applying it would resurrect an entity of that session for a frame.
+                    if (command.Generation < currentGeneration)
+                    {
+                        metrics.NoteStaleDropped();
+                        continue;
+                    }
 
-                    case NetworkViewCommandKind.Despawn:
-                        ApplyDespawn(entityManager, lifecycle, command);
-                        break;
+                    switch (command.Kind)
+                    {
+                        case NetworkViewCommandKind.Reset:
+                            // Every mirror still present belongs to the previous generation.
+                            Teardown(entityManager, lifecycle, NetworkDespawnReason.SessionReset);
+                            _generation = command.Generation;
+                            metrics.NoteGenerationReset();
+                            break;
+
+                        case NetworkViewCommandKind.Spawn:
+                            _generation = command.Generation;
+                            ApplySpawn(entityManager, mapping, lifecycle, command);
+                            break;
+
+                        case NetworkViewCommandKind.State:
+                            ApplyState(entityManager, mapping, writeHealth, lifecycle, metrics, command,
+                                       settings.Config, ref timeline.Clock, timed);
+                            break;
+
+                        case NetworkViewCommandKind.Despawn:
+                            ApplyDespawn(entityManager, lifecycle, command);
+                            break;
+                    }
                 }
+
+                if (count > 0) metrics.NoteDrain(count, NetworkIngestionMetrics.Now - started, oldestAge);
             }
 
             if (timed) SystemAPI.SetSingleton(timeline);
@@ -268,6 +320,7 @@ namespace Cuvara.DOTS.Netcode
             in SnapshotSpaceMapping mapping,
             bool writeHealth,
             NetworkEntityLifecycle lifecycle,
+            NetworkIngestionMetrics metrics,
             in NetworkViewCommand command,
             in InterpolationConfig interpolation,
             ref InterpolationClock clock,
@@ -292,7 +345,9 @@ namespace Cuvara.DOTS.Netcode
 
             // Always. This is what the server said, and it is the value a predictor rewinds to —
             // separate from what the client is currently showing, exactly as NetworkEntityState is
-            // separate from Health.
+            // separate from Health. Nothing rendered or predicted is ever written here: the only
+            // source is the command, and the command's only source is the wire.
+            var previousAnchor = entityManager.GetComponentData<ReconciliationAnchor>(entity);
             entityManager.SetComponentData(entity, new ReconciliationAnchor
             {
                 Position = position,
@@ -300,6 +355,8 @@ namespace Cuvara.DOTS.Netcode
                 // derived from `position` above — a round trip through the mapping is not bit-exact,
                 // and a predictor replaying from an off-by-one-ULP anchor drifts.
                 ServerPosition = new float2(command.X, command.Y),
+                Sequence = previousAnchor.Sequence + 1u,
+                Tick = command.Tick,
             });
 
             // A state that carries a tick is a sample, not a placement. It is buffered and the
@@ -319,7 +376,11 @@ namespace Cuvara.DOTS.Netcode
 
             if (buffered)
             {
-                if (TryAppendSample(entityManager, entity, command, interpolation))
+                if (!TryAppendSample(entityManager, entity, command, interpolation))
+                {
+                    metrics.NoteRejectedSample();
+                }
+                else
                 {
                     // The clock is told about the arrival regardless of which entity carried it:
                     // there is one render timeline per world, and every entity's ticks come off the
@@ -329,6 +390,17 @@ namespace Cuvara.DOTS.Netcode
                     // outright rather than being smoothed into it.
                     clock.NoteSnapshot(command.Tick, command.ReceiveTime, 0, interpolation);
                 }
+            }
+
+            // An untimed state for an entity that already holds samples: interpolation owns this
+            // transform. Writing it here would be the second writer the paragraph above forbids,
+            // just arriving through the other method — a consumer feeding one id through both
+            // SetState and SetStateAtTick. Counted, anchor and hp still written, transform left alone.
+            else if (interpolationInstalled
+                     && entityManager.HasBuffer<SnapshotSample>(entity)
+                     && entityManager.GetBuffer<SnapshotSample>(entity).Length > 0)
+            {
+                metrics.NoteMixedPath();
             }
 
             // The transform is written only while nothing else claims it. With a predictor owning
@@ -460,7 +532,10 @@ namespace Cuvara.DOTS.Netcode
         /// <see cref="ApplyDespawn"/> in the binder's order.
         /// </para>
         /// </remarks>
-        internal void Teardown(EntityManager entityManager, NetworkEntityLifecycle lifecycle)
+        internal void Teardown(
+            EntityManager entityManager,
+            NetworkEntityLifecycle lifecycle,
+            NetworkDespawnReason reason = NetworkDespawnReason.Teardown)
         {
             if (!_entities.IsCreated || _entities.Count == 0) return;
 
@@ -475,7 +550,7 @@ namespace Cuvara.DOTS.Netcode
             {
                 var alive = IsLiveMirror(entityManager, mirrors[i].Entity);
                 PublishDespawned(lifecycle, ids[i], mirrors[i],
-                    alive ? NetworkDespawnReason.Teardown : NetworkDespawnReason.ExternalDestruction);
+                    alive ? reason : NetworkDespawnReason.ExternalDestruction);
                 // Exists rather than alive: a mirror already stripped to its cleanup components is
                 // destroyed again harmlessly, and the view path finishes it next presentation.
                 if (entityManager.Exists(mirrors[i].Entity)) entityManager.DestroyEntity(mirrors[i].Entity);

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Threading;
 using Cuvara.DOTS.Configuration;
 using Cuvara.Netcode.View;
 using Unity.Collections;
@@ -54,11 +55,27 @@ namespace Cuvara.DOTS.Netcode
     /// which is exactly the same wait a direct write would face at the transform stage.
     /// </para>
     /// <para>
-    /// <b>One caller thread, whichever one that is.</b> The three <c>IEntityView</c> methods share
-    /// unsynchronised bookkeeping and must be called from a single thread — which costs nothing,
-    /// because <c>WorldViewBinder</c> is not thread-safe either and is the only thing that calls
-    /// them. The queue is the one structure that crosses threads, and it is the only one that has
-    /// to. Locking the bookkeeping as well would buy nothing and hide the requirement.
+    /// <b>One caller thread, whichever one that is — and it is enforced.</b> The three
+    /// <c>IEntityView</c> methods share unsynchronised bookkeeping (<c>_live</c>, the config-index
+    /// cache) and must be called from a single thread; <c>WorldViewBinder</c> is not thread-safe
+    /// either and is the only thing that calls them. The first call after construction or after
+    /// <see cref="BeginGeneration"/> latches the calling thread as the <i>producer</i>; a call from
+    /// any other thread throws <see cref="InvalidOperationException"/> rather than racing the
+    /// <c>HashSet</c>. The <see cref="System.Collections.Concurrent.ConcurrentQueue{T}"/> protects
+    /// only itself — it is the one structure that crosses to the drain's thread, and it is the only
+    /// one that has to. The <i>consumer</i> is <c>NetworkViewCommandSystem</c>, on the world's main
+    /// thread, and nothing else may dequeue.
+    /// </para>
+    /// <para>
+    /// <b>Generations: a reset is a boundary, not a burst of despawns.</b>
+    /// <see cref="BeginGeneration"/> forgets every live id, bumps <see cref="Generation"/> and
+    /// enqueues a single reset command. Every command carries the generation it was enqueued under;
+    /// the drain drops any command older than the view's current generation and, on the reset,
+    /// tears down every mirror of the previous one before applying anything new. Data from the old
+    /// session that was still queued — or that a stale producer enqueues afterwards under the old
+    /// stamp — therefore cannot respawn an old entity. <c>WorldViewBinder.Reset</c> alone cannot
+    /// give this guarantee: it enqueues despawns that are applied in order, so a state queued behind
+    /// them would still resurrect the id for a frame.
     /// </para>
     /// <para>
     /// <b>Not thread-safe against a catalog rebuild.</b> Archetype names are resolved to config
@@ -74,6 +91,19 @@ namespace Cuvara.DOTS.Netcode
         private readonly ConcurrentQueue<NetworkViewCommand> _commands = new ConcurrentQueue<NetworkViewCommand>();
         private readonly HashSet<string> _live = new HashSet<string>();
         private readonly Dictionary<string, int> _configIndexById = new Dictionary<string, int>();
+        private readonly NetworkIngestionMetrics _metrics = new NetworkIngestionMetrics();
+        private readonly int _backlogWarningThreshold;
+
+        /// <summary>Current session generation; starts at 1 and only ever grows.</summary>
+        private int _generation = 1;
+
+        /// <summary>Enqueued minus dequeued, kept here because <c>ConcurrentQueue.Count</c> is not O(1) everywhere.</summary>
+        private int _pending;
+
+        /// <summary>Managed thread id latched by the first producer call; 0 while unlatched.</summary>
+        private int _producerThreadId;
+
+        private bool _backlogWarned;
 
         /// <summary>
         /// Catalog version the cached indices were resolved against. A rebuild bumps the catalog's
@@ -113,13 +143,20 @@ namespace Cuvara.DOTS.Netcode
         /// container's instance when <c>Cuvara.DOTS.DI</c> registered one, so MessagePipe forwarding
         /// and direct subscribers see the same events.
         /// </param>
+        /// <param name="backlogWarningThreshold">
+        /// Pending-command count at which one warning per generation is logged. Diagnostics only —
+        /// the queue is not bounded and nothing is dropped; see <see cref="NetworkIngestionMetrics"/>
+        /// for why bounding waits on measurements. Non-positive disables the warning.
+        /// </param>
         public DotsEntityView(
             ViewConfigCatalog catalog,
             INetworkArchetypeResolver resolver,
             SnapshotSpaceMapping mapping = default,
             bool writeHealth = false,
-            NetworkEntityLifecycle lifecycle = null)
+            NetworkEntityLifecycle lifecycle = null,
+            int backlogWarningThreshold = 4096)
         {
+            _backlogWarningThreshold = backlogWarningThreshold;
             _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
             _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
             _mapping = mapping.IsPopulated ? mapping : SnapshotSpaceMapping.XZPlane;
@@ -138,7 +175,23 @@ namespace Cuvara.DOTS.Netcode
         public int Count => _live.Count;
 
         /// <summary>Commands enqueued and not yet drained. Diagnostics; zero every frame in health.</summary>
-        public int PendingCommands => _commands.Count;
+        public int PendingCommands => Volatile.Read(ref _pending);
+
+        /// <summary>
+        /// The session generation new commands are stamped with. Bumped by <see cref="BeginGeneration"/>.
+        /// Read by the drain to drop stale commands and by the prediction driver to reset its ack
+        /// tick across a reconnect.
+        /// </summary>
+        public int Generation => Volatile.Read(ref _generation);
+
+        /// <summary>Queue and drain counters. See <see cref="NetworkIngestionMetrics"/>.</summary>
+        public NetworkIngestionMetrics Metrics => _metrics;
+
+        /// <summary>Managed thread id the producer latched to, or 0 while no call has been made in this generation.</summary>
+        public int ProducerThreadId => Volatile.Read(ref _producerThreadId);
+
+        /// <summary>Pending-command count that logs the once-per-generation backlog warning; non-positive disables it.</summary>
+        public int BacklogWarningThreshold => _backlogWarningThreshold;
 
         /// <summary>Where the server's plane lands in the client's world.</summary>
         public SnapshotSpaceMapping Mapping => _mapping;
@@ -148,6 +201,7 @@ namespace Cuvara.DOTS.Netcode
 
         public void Spawn(string id, bool isLocal, string type)
         {
+            EnsureProducerThread();
             if (string.IsNullOrEmpty(id)) return;
 
             if (!_live.Add(id)) return;
@@ -179,7 +233,7 @@ namespace Cuvara.DOTS.Netcode
             var wireType = default(FixedString32Bytes);
             wireType.CopyFromTruncated(descriptor.Type);
 
-            _commands.Enqueue(new NetworkViewCommand
+            Enqueue(new NetworkViewCommand
             {
                 Kind = NetworkViewCommandKind.Spawn,
                 Id = wireId,
@@ -193,6 +247,7 @@ namespace Cuvara.DOTS.Netcode
 
         public void Despawn(string id)
         {
+            EnsureProducerThread();
             if (string.IsNullOrEmpty(id)) return;
 
             if (!_live.Remove(id)) return;
@@ -202,7 +257,7 @@ namespace Cuvara.DOTS.Netcode
             var wireId = default(FixedString64Bytes);
             if (wireId.CopyFromTruncated(id) != CopyError.None) return;
 
-            _commands.Enqueue(new NetworkViewCommand
+            Enqueue(new NetworkViewCommand
             {
                 Kind = NetworkViewCommandKind.Despawn,
                 Id = wireId,
@@ -262,6 +317,7 @@ namespace Cuvara.DOTS.Netcode
         /// </remarks>
         public void SetStateAtTick(string id, float x, float y, int hp, int maxHp, long tick, double receiveTimeSeconds)
         {
+            EnsureProducerThread();
             if (string.IsNullOrEmpty(id)) return;
 
             // A state for an id that was never spawned is dropped rather than spawning one. Spawn
@@ -273,7 +329,7 @@ namespace Cuvara.DOTS.Netcode
             var wireId = default(FixedString64Bytes);
             if (wireId.CopyFromTruncated(id) != CopyError.None) return;
 
-            _commands.Enqueue(new NetworkViewCommand
+            Enqueue(new NetworkViewCommand
             {
                 Kind = NetworkViewCommandKind.State,
                 Id = wireId,
@@ -295,7 +351,97 @@ namespace Cuvara.DOTS.Netcode
         /// <c>ISystem</c> and cannot hold a managed <c>List</c> field — a per-frame list would be a
         /// per-frame allocation, and a <c>NativeList</c> would be a copy of a copy.
         /// </remarks>
-        internal bool TryDequeue(out NetworkViewCommand command) => _commands.TryDequeue(out command);
+        internal bool TryDequeue(out NetworkViewCommand command)
+        {
+            if (!_commands.TryDequeue(out command)) return false;
+            Interlocked.Decrement(ref _pending);
+            return true;
+        }
+
+        /// <summary>
+        /// Starts a new session generation: forgets every live id, bumps <see cref="Generation"/>
+        /// and enqueues one reset command. Call on reconnect or map transfer, <i>before</i> the new
+        /// session's first snapshot is fed in.
+        /// </summary>
+        /// <returns>The new generation.</returns>
+        /// <remarks>
+        /// <para>
+        /// What the drain does with it: every command still queued from the old generation is
+        /// dropped unapplied (<see cref="NetworkIngestionMetrics.StaleCommandsDropped"/>), every
+        /// mirror of the old generation is torn down with
+        /// <see cref="NetworkDespawnReason.SessionReset"/>, and only then are the new generation's
+        /// commands applied. Old entities therefore never flicker back for a frame, and a stale
+        /// producer still holding the old <c>WorldViewBinder</c> cannot resurrect them either — its
+        /// commands carry the old stamp.
+        /// </para>
+        /// <para>
+        /// <b>Thread rule.</b> Must be called on the latched producer thread, or while no producer
+        /// is latched. It re-opens the latch, so the new session may drive the view from a different
+        /// thread — a reconnect that hands the socket to a new consumer thread is the normal case.
+        /// </para>
+        /// </remarks>
+        public int BeginGeneration()
+        {
+            var current = Thread.CurrentThread.ManagedThreadId;
+            var latched = Volatile.Read(ref _producerThreadId);
+            if (latched != 0 && latched != current)
+            {
+                throw new InvalidOperationException(
+                    $"DotsEntityView.BeginGeneration must run on the producer thread ({latched}); called from {current}.");
+            }
+
+            _live.Clear();
+            _configIndexById.Clear();
+            _backlogWarned = false;
+
+            var generation = Interlocked.Increment(ref _generation);
+            Enqueue(new NetworkViewCommand { Kind = NetworkViewCommandKind.Reset });
+
+            // Re-open the latch last, after the reset is queued under the new generation: the next
+            // producer call, from whatever thread, binds the new session.
+            Volatile.Write(ref _producerThreadId, 0);
+            return generation;
+        }
+
+        private void Enqueue(NetworkViewCommand command)
+        {
+            command.Generation = Volatile.Read(ref _generation);
+            command.EnqueueTime = NetworkIngestionMetrics.Now;
+            _commands.Enqueue(command);
+
+            var pending = Interlocked.Increment(ref _pending);
+            _metrics.NoteEnqueued(pending);
+
+            if (_backlogWarningThreshold > 0 && pending >= _backlogWarningThreshold && !_backlogWarned)
+            {
+                _backlogWarned = true;
+                Debug.LogWarning(
+                    $"[Cuvara.DOTS] DotsEntityView has {pending} commands pending (threshold {_backlogWarningThreshold}). " +
+                    "The drain is not running, or snapshots are outpacing frames. Nothing is dropped; this is reported once per generation.");
+            }
+        }
+
+        /// <summary>
+        /// Latches the first caller as the producer and refuses every other thread. Cheap: one
+        /// volatile read on the steady-state path.
+        /// </summary>
+        private void EnsureProducerThread()
+        {
+            var current = Thread.CurrentThread.ManagedThreadId;
+            var latched = Volatile.Read(ref _producerThreadId);
+            if (latched == current) return;
+
+            if (latched == 0)
+            {
+                latched = Interlocked.CompareExchange(ref _producerThreadId, current, 0);
+                if (latched == 0 || latched == current) return;
+            }
+
+            throw new InvalidOperationException(
+                $"DotsEntityView is driven from thread {latched}; this call came from thread {current}. " +
+                "IEntityView calls must come from one thread — the one that ticks WorldViewBinder. " +
+                "Call BeginGeneration on the producer thread to hand the view to a new one.");
+        }
 
         /// <summary>
         /// Resolves this entity's archetype to a config index and view key, caching per id.

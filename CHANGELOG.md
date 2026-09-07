@@ -9,6 +9,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`DotsEntityView` enforces its single-producer rule (D10).** The first `IEntityView` call after
+  construction or after `BeginGeneration` latches the calling thread; a call from any other thread
+  throws `InvalidOperationException` instead of racing the unsynchronised `_live`/config caches
+  that the `ConcurrentQueue` never protected. `ProducerThreadId` exposes the latch.
+- **`ReconciliationAnchor` gained `Sequence` and `Tick`.** `Sequence` increments on every
+  authoritative state the drain writes (0 = spawn placeholder); `Tick` is the caller-stated server
+  tick from `SetStateAtTick`, 0 when unstated — never invented. Both are written only from the
+  command, so nothing predicted or rendered can reach the anchor.
+- **`LocalPredictionSystem` reconciles only on a new ack paired with a fresh anchor** (`Sequence`
+  changed since the last reconcile and non-zero). An ack that advanced while the drain has not yet
+  refreshed the anchor waits one frame rather than pairing the new tick with the previous
+  snapshot's position, and the spawn placeholder is never rewound to. Its ack/anchor memory resets
+  when `DotsEntityView.Generation` changes, so reconciliation is not silently disabled after a
+  reconnect to a server whose ticks are lower.
+- **`NetworkViewCommandSystem` refuses the second transform writer through the other method.** An
+  untimed `SetState` for an entity that already holds buffered samples (it is owned by
+  `RemoteInterpolationSystem`) writes the anchor and hp but leaves `LocalTransform` alone, counted
+  in `Metrics.MixedPathStates`. Previously it teleported the entity and fought the job.
+- `NetworkViewCommandSystem.Teardown` takes a `NetworkDespawnReason` (default `Teardown`).
+- `DotsEntityView` constructor gained `backlogWarningThreshold` (default 4096): one warning per
+  generation when the pending count reaches it. Diagnostics only; nothing is dropped or capped.
+
+### Added
+
+- **Session generations.** `DotsEntityView.BeginGeneration()` forgets every live id, bumps
+  `Generation` and enqueues a `Reset` command; every command carries the generation it was
+  enqueued under. The drain drops commands older than the view's current generation
+  (`Metrics.StaleCommandsDropped`) and, on the reset, tears down every mirror of the previous
+  generation with the new `NetworkDespawnReason.SessionReset` before applying the new session.
+  Old-session data still queued — or enqueued later by a stale producer — cannot respawn an old
+  entity, not even for a frame. `BeginGeneration` re-opens the producer latch so a new session may
+  drive the view from a new thread.
+- **`NetworkIngestionMetrics`** (`DotsEntityView.Metrics`): `Enqueued`, `Drained`,
+  `PendingHighWatermark`, `Drains`, `LastDrainCount`, `LastDrainSeconds`, `MaxDrainSeconds`,
+  `LastOldestCommandAgeSeconds`, `MaxOldestCommandAgeSeconds`, `StaleCommandsDropped`,
+  `RejectedSamples`, `MixedPathStates`, `GenerationResets`. The drain runs under the
+  `Cuvara.DOTS.NetworkViewCommandSystem.Drain` profiler marker. Measured before any bounding of the
+  queue is considered; the queue stays unbounded and fully drained per frame.
+- Tests: `SnapshotIngestionTests` (13) — duplicate and reordered ticks refused without a direct
+  write, mixed-path guard, generation reset with queued stale commands, late old-session data,
+  two resets before a drain, AOI re-entry with a fresh ring, drain metrics, 3000-command burst
+  drained in one frame, backlog warning, producer-thread latch and re-latch.
+  `PredictionOwnershipTests` (6) — reconnect re-enables reconciliation, ack ahead of the anchor
+  waits, placeholder never reconciled, timed states on the predicted entity never rendered by
+  interpolation, toggling prediction leaves no frame without a writer, anchor never fed from the
+  predicted position.
+- `Documentation~/NETCODE-INTEGRATION.md`: thread affinity, generations, ingestion metrics,
+  transform ownership and reconciliation inputs.
+
+### Changed
+
 - **`ChunkViewProvisioner` requires a cascade sink (breaking).** The `cascadeSink` constructor
   parameter is no longer optional; passing `null` throws `ArgumentNullException`. A streaming world
   passes `EntityViewCascade`; a context with no view layer says so explicitly with the new
