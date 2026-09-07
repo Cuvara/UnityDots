@@ -27,6 +27,13 @@ namespace Cuvara.DOTS.Configuration
     /// </remarks>
     public struct ViewConfigTable
     {
+        /// <summary>
+        /// The <see cref="ViewConfigCatalog.Version"/> this table was built at. A
+        /// <see cref="ViewConfigRef"/> stamped with a different version is refused by the spawn
+        /// path — see <see cref="ViewConfigRef.Version"/>.
+        /// </summary>
+        public int Version;
+
         public BlobArray<ViewConfigRecord> Records;
 
         /// <summary>Index of the record registered under <paramref name="nameHash"/>, or -1.</summary>

@@ -29,7 +29,7 @@ namespace Cuvara.DOTS.DI
     public static class MessagePipeVContainer
     {
         /// <summary>
-        /// Registers the five package message types. Call after MessagePipe's own
+        /// Registers the five view/chunk message types. The netcode adapter's two lifecycle events are registered by <see cref="NetworkLifecycleVContainer.RegisterDotsNetworkLifecycle"/> instead, because they exist only when <c>com.cuvara.netcode</c> does. Call after MessagePipe's own
         /// <c>RegisterMessagePipe()</c> and its <c>RegisterMessageBroker&lt;T&gt;</c> calls for these
         /// types; without them the resolve of <c>IPublisher&lt;T&gt;</c> fails at build time rather
         /// than silently doing nothing.
@@ -44,11 +44,28 @@ namespace Cuvara.DOTS.DI
             return builder;
         }
 
-        private static void RegisterMessage<TMessage>(IContainerBuilder builder)
+        internal static void RegisterMessage<TMessage>(IContainerBuilder builder)
         {
 #if CUVARA_DOTS_MESSAGEPIPE
+            // MessagePipe is installed, but this container may not have registered a broker for
+            // TMessage — the consumer forgot RegisterMessageBroker<T>, or deliberately does not
+            // want that message. Either way a failed resolve at container build is the wrong
+            // outcome for an optional transport: the package falls back to the no-op publisher and
+            // says so once, and the consumer decides whether that is a bug.
             builder.Register<IDotsPublisher<TMessage>>(
-                container => new MessagePipeDotsPublisher<TMessage>(container.Resolve<global::MessagePipe.IPublisher<TMessage>>()),
+                container =>
+                {
+                    if (container.TryResolve<global::MessagePipe.IPublisher<TMessage>>(out var publisher))
+                    {
+                        return new MessagePipeDotsPublisher<TMessage>(publisher);
+                    }
+
+                    UnityEngine.Debug.LogWarning(
+                        $"[Cuvara.DOTS] MessagePipe is installed but no IPublisher<{typeof(TMessage).Name}> is registered in this " +
+                        "container; messages of that type are dropped. Call RegisterMessagePipe() and " +
+                        $"RegisterMessageBroker<{typeof(TMessage).Name}>() before RegisterDotsViews to receive them.");
+                    return NullDotsPublisher<TMessage>.Instance;
+                },
                 Lifetime.Singleton);
 
             builder.Register<IDotsSubscriber<TMessage>>(

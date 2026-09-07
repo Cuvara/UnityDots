@@ -32,10 +32,21 @@ real server:
 | `server (x, y)` vs `anchor world` | `ReconciliationAnchor.ServerPosition` carries what the server sent, and the real `SnapshotSpaceMapping` placed it |
 | `predicted: N` and `writer:` | exactly one entity is predicted, and exactly one thing writes `LocalTransform` this frame |
 | `pending` / `replayed` / `corrections` | the predictor is actually reconciling rather than idling |
+| `present (events)` and the `lifecycle:` tail | `NetworkEntitySpawned` / `NetworkEntityDespawned` fire exactly once per life of an id — `present` must equal `mirror entities` — and an AOI exit/re-entry shows as a `-`/`+` pair for the same id with a **new** `Entity` |
 
 `writer:` is the one to watch. It must read `predictor` for the local entity with prediction on and
 `adapter` with it off — and it must never be ambiguous, because both writing is the failure the
 `PredictedTransform` marker exists to prevent and neither writing is a frozen avatar.
+
+## The lifecycle consumer
+
+`NetworkLifecycleLog.cs` is the package's reference consumer of the network lifecycle events: two
+handlers on `DotsEntityView.Lifecycle`, no DI, no MessagePipe. It counts presence and prints the last
+six events with their `NetworkDespawnReason`. Walk a second client out of range and back to watch
+`Despawned` then a fresh spawn; stop play to watch every remaining id get one `Teardown` — that is
+`DotsNetcodeBootstrap.Uninstall(world, destroyMirrors: true)` in `OnDestroy`. Nothing here says
+"died": the wire does not distinguish an AOI exit from a removal, and the events do not pretend to.
+Contract: `Documentation~/NETWORK-LIFECYCLE.md`.
 
 ## The A/B worth doing
 

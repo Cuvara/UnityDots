@@ -17,7 +17,7 @@ namespace Cuvara.DOTS.Tests.Editor
         public void SetUp()
         {
             _provider = new RecordingViewAssetProvider();
-            _provisioner = new ChunkViewProvisioner(_provider);
+            _provisioner = new ChunkViewProvisioner(_provider, NullViewCascadeSink.Instance);
             _transitions = new List<(string, ChunkState)>();
             _provisioner.OnChunkStateChanged += (id, state) => _transitions.Add((id, state));
         }

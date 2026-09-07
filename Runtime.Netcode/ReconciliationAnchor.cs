@@ -56,7 +56,7 @@ namespace Cuvara.DOTS.Netcode
     /// adding one would put the trap back within reach.
     /// </para>
     /// <para>
-    /// <b>Position only — no tick on either field.</b> A reconciliation anchor is a
+    /// <b>No guessed tick.</b> <see cref="Tick"/> is non-zero only when the caller stated one. A reconciliation anchor is a
     /// position <i>at a tick</i>, and this adapter genuinely does not know the tick:
     /// <c>IEntityView.SetState</c> carries <c>(id, x, y, hp, maxHp)</c> and nothing else. The tick a
     /// predictor needs is <c>WorldState.AckTick</c> — "the newest input tick the server accepted for
@@ -84,5 +84,23 @@ namespace Cuvara.DOTS.Netcode
         /// type's remarks.
         /// </remarks>
         public float2 ServerPosition;
+
+        /// <summary>
+        /// Incremented by the drain on every authoritative state written to this anchor; zero until
+        /// the first state lands. A predictor reconciles only when this has moved since its last
+        /// reconcile, so a newer <c>WorldState.AckTick</c> paired with an anchor the drain has not
+        /// refreshed yet — the binder ticked between the drain and the predictor — waits one frame
+        /// instead of replaying against the previous snapshot's position.
+        /// </summary>
+        public uint Sequence;
+
+        /// <summary>
+        /// The server tick the state was true on, when the caller stated one through
+        /// <c>DotsEntityView.SetStateAtTick</c>; <c>0</c> for a state that arrived without a tick.
+        /// Diagnostic and honest, never invented: see the type remarks for why this component
+        /// carries no guessed tick, and <c>NetworkViewCommand.Tick</c> for the same rule at the
+        /// queue.
+        /// </summary>
+        public long Tick;
     }
 }

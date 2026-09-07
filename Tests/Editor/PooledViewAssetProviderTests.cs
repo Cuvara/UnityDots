@@ -8,21 +8,27 @@ namespace Cuvara.DOTS.Tests.Editor
     {
         private PooledViewAssetProvider _provider;
         private GameObject _prefab;
+        private Transform _poolRoot;
 
         [SetUp]
         public void SetUp()
         {
             _prefab = new GameObject("TestPrefab");
             _prefab.SetActive(false); // prefabs are inactive
-            var poolRoot = new UnityEngine.GameObject("[TestPoolRoot]").transform;
-            _provider = new PooledViewAssetProvider(poolRoot, defaultPoolSize: 4, maxPoolSize: 8);
+            _poolRoot = new UnityEngine.GameObject("[TestPoolRoot]").transform;
+            _provider = new PooledViewAssetProvider(_poolRoot, defaultPoolSize: 4, maxPoolSize: 8);
             _provider.RegisterPrefab("goblin", _prefab);
         }
 
         [TearDown]
         public void TearDown()
         {
+            // Dispose warns about leases a test left open on purpose; that is not a failure here.
+            UnityEngine.TestTools.LogAssert.ignoreFailingMessages = true;
             _provider.Dispose();
+            UnityEngine.TestTools.LogAssert.ignoreFailingMessages = false;
+            // The root is caller-owned, so Dispose leaves it; the test cleans up its own object.
+            if (_poolRoot != null) Object.DestroyImmediate(_poolRoot.gameObject);
             if (_prefab != null) Object.DestroyImmediate(_prefab);
         }
 

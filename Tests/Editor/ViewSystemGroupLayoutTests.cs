@@ -42,6 +42,8 @@ namespace Cuvara.DOTS.Tests.Editor
             typeof(EntityViewSpawnSystem),
             typeof(EntityViewDespawnSystem),
             typeof(EntityViewTransformSyncSystem),
+            typeof(ViewOverlaySystem),
+            typeof(MinimapDataSystem),
         };
 
         private static readonly Type[] PackageGroups =

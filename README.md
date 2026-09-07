@@ -1,122 +1,89 @@
 # Cuvara DOTS
 
-Shared DOTS/ECS building blocks for Cuvara projects — reusable components, systems, jobs and authoring helpers built on Unity Entities, Burst, Collections and Mathematics.
+Shared DOTS/ECS building blocks for Cuvara projects — hybrid entity↔GameObject views, chunk-aware
+view provisioning, simulation scaffolding, and an adapter that presents `com.cuvara.netcode`'s
+replicated entities as ECS entities with interpolation, prediction and lifecycle events. Built on
+Unity Entities, Burst, Collections and Mathematics.
 
-**Status: early.** Ships the hybrid entity↔GameObject view layer and chunk-aware view
-provisioning. Not yet compiled against a Unity Editor — see `CHANGELOG.md`.
+**Status: 0.27.1, plumbing complete, gameplay content absent.** The view layer, provisioning,
+simulation seam, netcode adapter and prediction driver are implemented, tested in CI and wired into
+the client. Several 0.26–0.27 additions are *not* finished features: minimap, physics collision
+events and 2D sorting are data contracts with no producer; camera follow and the physics movement
+bridge have no installer. **Read `Documentation~/SUPPORT-MATRIX.md` before depending on anything
+in the last two groups** — it classifies every feature as implemented / integrated in client /
+sample-only / data-contract-only / planned, and records what CI actually tests.
 
 ## Layout
 
-| Path | Assembly | Optional? | Purpose |
-|---|---|---|---|
-| `Runtime/` | `Cuvara.DOTS.Runtime` | no | View link components, registry, spawn/despawn/sync systems, provisioning interfaces |
-| `Runtime.GameFoundation/` | `Cuvara.DOTS.GameFoundation` | yes — UniT + UniTask defines | `IViewAssetProvider` over `IAssetsManager` + `IObjectPoolManager` |
-| `Runtime.GameLogic/` | `Cuvara.DOTS.GameLogic` | yes — `CUVARA_SHARED_GAMELOGIC` | `ISimulationModel` over `Shared.GameLogic`, plus all `Vec2`↔`float2` conversion |
-| `Runtime.DI/` | `Cuvara.DOTS.DI` | yes — `CUVARA_DOTS_VCONTAINER` | `RegisterDotsViews()`, `RegisterSimulationModel()`, MessagePipe binding |
-| `Runtime.Netcode/` | `Cuvara.DOTS.Netcode` | yes — `CUVARA_NETCODE`, netcode >= 0.4.0 | `IEntityView` over ECS: server snapshots become entities and views |
-| `Editor/` | `Cuvara.DOTS.Editor` | no | Editor-only tooling and inspectors |
-| `Tests/Runtime/` | `Cuvara.DOTS.Tests.Runtime` | no | Play-mode tests |
-| `Tests/Editor/` | `Cuvara.DOTS.Tests.Editor` | no | Edit-mode tests |
-| `Tests/Editor.GameLogic/` | `Cuvara.DOTS.Tests.GameLogic` | yes — `CUVARA_SHARED_GAMELOGIC` | Constants parity + golden vectors through the seam |
-| `Tests/Editor.Netcode/` | `Cuvara.DOTS.Tests.Netcode` | yes — `CUVARA_NETCODE` | The snapshot adapter end to end, driven through the public groups |
+| Path | Assembly | Gate | Purpose | Status |
+|---|---|---|---|---|
+| `Runtime/` | `Cuvara.DOTS.Runtime` | none | View link + registry + systems, view config as data, provisioning seam and `PooledViewAssetProvider`, simulation systems, group tree, module records, messaging seam, overlay feed + consumer helpers, minimap module, camera follow | core; see matrix per feature |
+| `Runtime.Netcode/` | `Cuvara.DOTS.Netcode` | `CUVARA_NETCODE` — `com.cuvara.netcode` **≥ 0.31.0** | `IEntityView` over ECS, remote interpolation, network lifecycle events | implemented, in client |
+| `Runtime.Netcode.Prediction/` | `Cuvara.DOTS.Netcode.Prediction` | `CUVARA_NETCODE` + `CUVARA_SHARED_GAMELOGIC` | Client-side prediction driver | implemented, in client |
+| `Runtime.GameLogic/` | `Cuvara.DOTS.GameLogic` | `CUVARA_SHARED_GAMELOGIC` | `ISimulationModel` over `Shared.GameLogic` | implemented, in client |
+| `Runtime.DI/` | `Cuvara.DOTS.DI` | `CUVARA_DOTS_VCONTAINER` (+ optional `CUVARA_DOTS_MESSAGEPIPE`, `CUVARA_NETCODE`) | `RegisterDotsViews`, `RegisterDotsMessaging`, `RegisterSimulationModel`, `RegisterDotsNetworkLifecycle` | compile-checked only |
+| `Runtime.GameFoundation/` | `Cuvara.DOTS.GameFoundation` | UniT pooling + resources + UniTask | `IViewAssetProvider` over `IAssetsManager` + `IObjectPoolManager` | compile-checked only |
+| `Runtime.Physics/` | `Cuvara.DOTS.Physics` | `CUVARA_DOTS_PHYSICS` — `com.unity.physics` ≥ 1.0.0; not auto-referenced | Body factory, spatial queries, `MoveData` → `PhysicsVelocity` bridge. **No collision/trigger collector.** | untested, not in CI |
+| `Editor/` | `Cuvara.DOTS.Editor` | Editor | DOTS View Debug window | untested |
+| `Tests/Editor/`, `Tests/Runtime/` | `Cuvara.DOTS.Tests.Editor`, `.Runtime` | tests | Core EditMode / PlayMode tests | CI floors 30 / 29 |
+| `Tests/Editor.Netcode/`, `Tests/Editor.Prediction/`, `Tests/Editor.GameLogic/` | `Cuvara.DOTS.Tests.*` | as their runtime assembly | Adapter, prediction, shared-logic parity | CI floors 47 / 19 / 41 |
+| `Samples~/` | `Cuvara.DOTS.Samples.*` | per sample | Hybrid Views (scene), Networked Prediction (live backend), Stress Benchmark | sample-only |
 
-The optional assemblies are gated by asmdef `versionDefines` + `defineConstraints`, the same
-way `com.gdk.core` gates `GDK_VCONTAINER`. With VContainer absent, `Cuvara.DOTS.DI` is not
-compiled and the core still works — you construct `EntityViewRegistry` yourself and call
-`DotsViewBootstrap.Install(world, registry)`. With GameFoundation/UniT absent, you implement
-`IViewAssetProvider` over whatever pool you do have. **The core assembly references none of them**,
-and installs against its four pinned Unity dependencies alone.
-
-The dependency arrow between this package and `com.cuvara.netcode` is **one-way**: DOTS may
-reference netcode, netcode never references DOTS. That is what keeps the netcode package usable by a
-GameObject client.
+Optional assemblies are gated by asmdef `versionDefines` + `defineConstraints`: with the dependency
+absent the assembly is not compiled and the core still works. **The core references none of them**
+and installs against its four pinned Unity dependencies alone — CI's *no optional packages* row
+exists to prove it. The dependency arrow between this package and `com.cuvara.netcode` is
+**one-way**: DOTS may reference netcode, netcode never references DOTS.
 
 ## Netcode adapter
 
-With `com.cuvara.netcode` installed, `Cuvara.DOTS.Netcode` supplies a `Cuvara.Netcode.View.IEntityView`
-that presents replicated entities as ECS entities driven through this package's own view pipeline.
+With `com.cuvara.netcode` ≥ 0.31.0 installed, `Cuvara.DOTS.Netcode` supplies a
+`Cuvara.Netcode.View.IEntityView` that presents replicated entities as ECS entities driven through
+this package's own view pipeline.
 
 ```csharp
-// Which archetype an entity is presented as, keyed on the kind the server sent. Arguments are
-// (localArchetype, unknownArchetype, ...rules); a null unknownArchetype means an unmapped kind is
-// refused and logged rather than quietly rendered as something else.
 var resolver = new TypeArchetypeResolver(
-    "player-local",
-    null,
+    "player-local", null,                                    // local archetype; no catch-all for unknown kinds
     new TypeArchetypeResolver.Rule("player", "player-remote"),
     new TypeArchetypeResolver.Rule("mob", "goblin"));
 
 var view = new DotsEntityView(catalog, resolver, SnapshotSpaceMapping.XZPlane);
-DotsNetcodeBootstrap.Install(world, view);          // publishes NetworkEntityViewReference
+DotsNetcodeBootstrap.Install(world, view);                   // after DotsViewBootstrap.Install
 
-var binder = new WorldViewBinder(view);             // from com.cuvara.netcode
-// ... once per frame, from wherever you consume the socket:
-binder.Tick(worldState, networkClient.UserId);
+var spawned = view.Lifecycle.Subscribe((NetworkEntitySpawned e) => Debug.Log($"+ {e.EntityId} {e.Entity}"));
+
+var binder = new WorldViewBinder(view);                      // from com.cuvara.netcode
+binder.Tick(worldState, networkClient.UserId);               // once per frame, from the socket consumer
 ```
 
-Each replicated id becomes an entity carrying `NetworkEntity` (the wire id, the server's entity kind,
-and `IsLocal`), `NetworkEntityState` (the newest authoritative hp), `ReconciliationAnchor` (the newest
-authoritative position), a `SnapshotSample` buffer and an `InterpolationState` (what remote
-interpolation has to work with, and what it last drew), a `LocalTransform`, and the
-`EntityViewRequest` + `ViewConfigRef` pair the spawn path already understands. Nothing about the
-presentation is hardcoded: the prefab, pool size, scale and offsets all come from the `ViewConfig` the
-resolver named.
+Each replicated id becomes an entity carrying `NetworkEntity` (wire id, kind, `IsLocal`),
+`NetworkEntityState` (newest authoritative hp), `ReconciliationAnchor` (newest authoritative
+position), a `SnapshotSample` buffer + `InterpolationState`, a `LocalTransform`, and the
+`EntityViewRequest` + `ViewConfigRef` pair the spawn path already understands.
 
-Four things worth knowing before wiring it up:
-
-- **Requires `com.cuvara.netcode` 0.19.0 or newer**, enforced by the asmdef's `versionDefines`
-  expression rather than by a `package.json` dependency. With an older netcode installed the define
-  is never set and `Cuvara.DOTS.Netcode` simply does not compile into the project — the adapter is
-  absent instead of broken. The floor was 0.4.0, the release that added the entity type to
-  `IEntityView.Spawn`; it is 0.19.0 from this version because remote interpolation reads
-  `Cuvara.Netcode.Interpolation`, which does not exist before then. Left at 0.4.0 the define would
-  be set against a netcode that has no such namespace, and the adapter would fail to compile with a
-  missing-type error that names a type rather than a version.
-- **Kind comes from the wire, never from the id.** `TypeArchetypeResolver` maps the server's entity
-  type (`"player"`, `"mob"`, …) to an archetype name, exactly and ordinally. Inferring kind from an
-  id prefix is what `PrefixArchetypeResolver` did before 0.9.0, and it is gone.
+What to know before wiring it up — each expanded in `Documentation~/NETCODE-INTEGRATION.md`:
 
 - **`IEntityView` calls enqueue; they do not write components.** The queue is drained by an internal
-  system in `NetcodeSystemGroup`, which is in `InitializationSystemGroup` — before this frame's
-  transforms and long before this frame's `ViewSystemGroup`. A snapshot applied before initialization
-  is a positioned view in the same frame. Calling `binder.Tick` from the socket thread is therefore
-  safe, which it would not be if the adapter touched `EntityManager` directly.
-- **Server `(x, y)` → world placement is `SnapshotSpaceMapping`, a constructor argument**, not a
-  constant and not a per-archetype setting. `XZPlane` (the default) puts the server plane on Unity's
-  ground plane with no lift; the per-art half-height lift belongs in `ViewConfig.PositionOffset`,
-  which is applied to the view instance rather than to the entity.
-- **Wire hp lands on `NetworkEntityState`, not on `Health`.** `Health` means "destroy at zero" in
-  this package, so mirroring server hp into it lets a client-side system destroy an entity the
-  server still lists. Pass `writeHealth: true` if you want that anyway.
-- **Remote entities can be interpolated in ECS, and it is opt-in because the tick is.**
-  `IEntityView.SetState` carries no server tick, and without one there is no timeline to place a
-  state on — so a state arriving through the interface is applied exactly as it always was, written
-  straight to the transform. `DotsEntityView.SetStateAtTick(id, x, y, hp, maxHp, tick, receiveTime)`
-  is the adapter's own entry point for a caller that *does* have the tick, typically a snapshot
-  handler reading `WorldState.Tick`. A state with a tick is appended to the entity's `SnapshotSample`
-  buffer and rendered every frame by `RemoteInterpolationSystem`, which evaluates
-  `Cuvara.Netcode.Interpolation.SnapshotInterpolation` — netcode's own core, the same one
-  `WorldViewBinder` uses, in a Bursted `IJobEntity` over chunk memory. There is no interpolation
-  arithmetic in this package and there must never be.
-
-  **Do not feed the same entity both ways.** `WorldViewBinder.Tick` interpolates on the netcode side
-  and hands the *result* to `SetState`, so buffering those and interpolating again would stack a
-  second `TargetDelay` on top of the first — remote entities twice as far behind, smoothly, with
-  nothing to notice. The drain enforces the split per entity rather than trusting it: a ticked state
-  is buffered and the transform is left alone; an unticked one is written and the buffer stays empty,
-  so the job passes over the entity.
-
-  Tuning is `DotsNetcodeBootstrap.Install(world, view, interpolation)` — an `InterpolationConfig`,
-  netcode's own blittable struct, published as the `InterpolationSettings` singleton because a
-  `[BurstCompile]` job cannot read a `ScriptableObject`. `default` means netcode's defaults: 100 ms
-  of render delay and 8 retained samples. The local player pays none of it — a predicted entity
-  carries `PredictedTransform` and is excluded.
-- **A predictor takes the transform by adding `PredictedTransform`.** The adapter then writes only
-  `ReconciliationAnchor` — the last authoritative position, in world space — and leaves
-  `LocalTransform` alone, so each component has exactly one writer. Without the tag nothing changes:
-  the adapter positions every entity, which is what every build with no predictor needs. The anchor's
-  *tick* is not here and cannot be: `IEntityView.SetState` does not carry one. A predictor reads
-  `WorldState.AckTick` from netcode, which is documented as exactly that anchor.
+  system in `SnapshotApplyGroup` (Initialization), so `binder.Tick` may run on the socket thread and
+  a snapshot applied before initialization is a positioned view in the same frame.
+- **Kind comes from the wire, never from the id.** `TypeArchetypeResolver` maps the server's entity
+  type to an archetype name; an unmapped kind is refused and logged once.
+- **Server `(x, y)` → world placement is `SnapshotSpaceMapping`**, a constructor argument. Per-art
+  height lift belongs in `ViewConfig.PositionOffset`.
+- **Wire hp lands on `NetworkEntityState`, not on `Health`.** `Health` means "destroy at zero" here.
+  `writeHealth: true` opts in.
+- **Remote interpolation in ECS is opt-in via `SetStateAtTick`.** A state with a tick is buffered and
+  rendered by `RemoteInterpolationSystem` (netcode's `SnapshotInterpolation`, in a Burst job); a
+  state without one is written straight to the transform. Never feed one entity both ways.
+- **A predictor claims the transform by adding `PredictedTransform`**; the adapter then writes only
+  `ReconciliationAnchor`. `DotsPredictionBootstrap.Install(world, predictor, worldState)` installs
+  the driver.
+- **Network presence has its own events.** `NetworkEntitySpawned` / `NetworkEntityDespawned` on
+  `view.Lifecycle` fire exactly once per life of an id, carry `Entity` with version and a
+  `NetworkDespawnReason` that is never "died" — the wire does not distinguish an AOI exit from a
+  removal. They are separate from the visual `ViewSpawned`/`ViewDespawned`. Teardown:
+  `DotsNetcodeBootstrap.Uninstall(world, destroyMirrors: true)`. Contract and scripted sequences:
+  `Documentation~/NETWORK-LIFECYCLE.md`.
 
 ## View configuration
 
@@ -125,67 +92,112 @@ server uses. At session start, build the catalog and publish it:
 
 ```csharp
 var catalog = new ViewConfigCatalog();
-catalog.Build(library);
+catalog.BuildOrThrow(library);       // validates first — see Documentation~/CONFIG-VALIDATION.md
 catalog.Install(world);              // publishes ViewConfigTableReference
 
-// Warm what the catalog needs, using its own pool sizes:
 foreach (var (key, size) in catalog.PoolSizesByKey())
     await provisioner.PrewarmChunkAsync("chunk-12-4", new[] { key }, countPerKey: size);
 
-// Spawn by archetype name — resolve once, carry the index:
+
+
+// Spawn by archetype name — resolve once, carry a versioned ref issued by the catalog:
 entityManager.AddComponentData(entity, new EntityViewRequest { ViewKey = "goblin" });
-entityManager.AddComponentData(entity, new ViewConfigRef { Index = catalog.IndexOf("goblin") });
+entityManager.AddComponentData(entity, catalog.CreateRef(catalog.IndexOf("goblin")));
 ```
 
+The bare-key path still works: an entity with only `EntityViewRequest` behaves as before configs
+existed. A rebuild invalidates every index handed out before it. `catalog.Dispose()` releases the
+blob. `ViewSortingKey` is copied from the config and **not applied** to any renderer.
+
 The bare-key path still works exactly as before: an entity with only `EntityViewRequest` and no
-`ViewConfigRef` behaves as it always did. `catalog.Dispose()` releases the blob.
+`ViewConfigRef` behaves as it always did. `catalog.Dispose()` releases the blob and removes the
+singleton from every world it was installed in.
+
+A `ViewConfigRef` is **versioned**: every `catalog.Build` bumps `catalog.Version`, and a ref from
+an earlier version is refused by the spawn path (falling back to the request's own key) rather than
+resolving to whatever now sits at that index. Never construct one with `new` — it carries version 0
+and is always refused. Validation (`ViewConfigValidator`, `catalog.TryBuild`) reports empty,
+duplicate or overlong keys, missing prefabs, non-finite values and unknown entity-type mappings
+before gameplay; `Documentation~/CONFIG-VALIDATION.md` has the full contract.
 
 ## System groups
 
-Every package system is `[DisableAutoCreation]` and created by `DotsViewBootstrap.Install(world, registry)`.
-Groups are `public` and are the ordering contract; the systems inside them are `internal` and will change.
+Every package system is `[DisableAutoCreation]` and created by an explicit bootstrap:
+`DotsViewBootstrap.Install(world, registry)` (view tree), `DotsSimulationBootstrap.InstallSimulationSystems(world)`,
+`DotsNetcodeBootstrap.Install(world, view)`, `DotsPredictionBootstrap.Install(world, predictor, worldState)`.
+Groups are `public` and are the ordering contract; the systems inside them are `internal`.
 
 ```
 InitializationSystemGroup                     [Unity]
-├── NetcodeSystemGroup                        snapshot apply (Cuvara.DOTS.Netcode, when installed)
+├── NetcodeSystemGroup
+│   ├── SnapshotApplyGroup                    NetworkViewCommandSystem (netcode)
+│   └── PredictionSystemGroup                 UpdateAfter(SnapshotApplyGroup); LocalPredictionSystem (prediction)
 └── ProvisioningSystemGroup                   UpdateAfter(NetcodeSystemGroup); empty
 SimulationSystemGroup                         [Unity]
 ├── GameplaySystemGroup                       UpdateBefore(TransformSystemGroup)
-│   ├── MovementSystemGroup                   (empty)
-│   ├── LifecycleSystemGroup                  UpdateAfter(MovementSystemGroup); empty
+│   ├── MovementSystemGroup                   MoveToward → MoveBounce → Spin; PhysicsMovementBridge declares itself here but nothing installs it
+│   ├── LifecycleSystemGroup                  UpdateAfter(MovementSystemGroup); HealthDeath → TimeToLive
 │   └── DotsEndSimulationCommandBufferSystem  OrderLast
 └── TransformSystemGroup                      [Unity]
 PresentationSystemGroup                       [Unity]
 └── ViewSystemGroup
     ├── ViewInterpolationGroup                UpdateBefore(ViewLifecycleGroup); empty without netcode
-    │   ├── InterpolationClockSystem          advances the render clock once per frame
+    │   ├── InterpolationClockSystem
     │   └── RemoteInterpolationSystem         UpdateAfter(InterpolationClockSystem)
-    ├── ViewLifecycleGroup                    structural: views appear/disappear
+    ├── ViewLifecycleGroup
     │   ├── EntityViewDespawnSystem           first — freed instances reusable this frame
     │   └── EntityViewSpawnSystem             UpdateAfter(EntityViewDespawnSystem)
     └── ViewTransformSyncGroup                UpdateAfter(ViewLifecycleGroup)
-        └── EntityViewTransformSyncSystem
+        ├── EntityViewTransformSyncSystem
+        ├── ViewOverlaySystem                 UpdateAfter(EntityViewTransformSyncSystem)
+        └── MinimapDataSystem                 UpdateAfter(EntityViewTransformSyncSystem); MinimapBootstrap
+    └── CameraFollowSystem                    UpdateAfter(ViewTransformSyncGroup); CameraFollowBootstrap
+
+    ├── ViewTransformSyncGroup                UpdateAfter(ViewLifecycleGroup)
+    │   ├── EntityViewTransformSyncSystem
+    │   └── ViewOverlaySystem                 UpdateAfter(EntityViewTransformSyncSystem)
+    └── CameraFollowSystem                    UpdateAfter(ViewTransformSyncGroup); only with CameraFollowBootstrap
 ```
 
-Order your own systems against the groups: `[UpdateAfter(typeof(ViewSystemGroup))]`.
+Order your own systems against the groups: `[UpdateAfter(typeof(ViewSystemGroup))]`. After any
+manual install, `SystemOrderVerifier.Verify(world)` returns every declared relation the actual
+update order violates — a system added to the wrong group, a group left unsorted — recursively
+through the subgroups.
+
+## Modules: install, uninstall, ownership
+
+Each optional piece is a module with a bootstrap, an idempotent `Install`, a safe-twice
+`Uninstall`, and a recorded owner (`DotsModuleScope.Root` or `Session`) kept **in the world**, so a
+disposed session leaves no stale `World` reference behind:
+
+```csharp
+DotsViewBootstrap.Install(world, registry);                       // Root by default
+DotsSimulationBootstrap.InstallSimulationSystems(world);          // Root by default
+CameraFollowBootstrap.Install(world, new CameraFollowConfig());   // Session; validates the config — Documentation~/CAMERA-FOLLOW.md
+PhysicsMovementBootstrap.Install(world);                          // Session; Runtime.Physics only
+PhysicsEventsBootstrap.Install(world);                            // Session; collision/trigger enter/stay/exit — Documentation~/PHYSICS.md
+
+DotsModules.UninstallScope(world, DotsModuleScope.Session);       // scene reload
+DotsModules.UninstallAll(world); world.Dispose();                 // permanent teardown
+```
+
+`Documentation~/MODULE-LIFECYCLE.md` states the contract line by line: install twice, uninstall
+twice, registry replacement, two worlds, temporary disable versus world disposal.
 
 ## Usage
 
 ```csharp
-// DI (VContainer + GameFoundation present), after RegisterGameFoundation:
-builder.RegisterGameFoundationViewProvisioning();
-builder.RegisterDotsViews(viewRoot);
+// DI (VContainer present), after MessagePipe's RegisterMessagePipe()/RegisterMessageBroker<T>() calls:
+builder.Register<IViewAssetProvider>(_ => new PooledViewAssetProvider(...), Lifetime.Singleton);   // or your own
+builder.RegisterDotsViews(viewRoot);                 // registry, cascade sink, provisioner, DotsViewBootstrap.Install
+builder.RegisterSimulationModel();                   // SharedGameLogicSimulation or PassiveSimulationModel
+builder.RegisterDotsNetworkLifecycle();              // NetworkEntityLifecycle (+ MessagePipe forwarding when present)
 
 // Warm everything a chunk needs, then drop it when the chunk unloads:
 await provisioner.PrewarmChunkAsync("chunk-12-4", new[] { "goblin", "torch" }, countPerKey: 8);
-
-// Views still standing on the chunk's expiring keys are despawned first, then the assets go.
-// The entities survive without views; a ChunkCascadeReleased message reports how many.
-var result = provisioner.ReleaseChunk("chunk-12-4");   // keys another chunk still lists survive
-Debug.Log($"released {result.KeysReleased} keys, cascaded {result.ViewsDespawned} views");
+var result = provisioner.ReleaseChunk("chunk-12-4");   // views on expiring keys cascade-despawn first
 
 // Simulation seam — identical call sites with or without com.rpgmmo.shared-gamelogic:
-builder.RegisterSimulationModel();
 if (model.IsAuthoritative)          // false => no shared logic; do NOT predict
     model.TryMove(in entity, input, dt, in bounds, out var predicted);
 
@@ -193,21 +205,25 @@ if (model.IsAuthoritative)          // false => no shared logic; do NOT predict
 entityManager.AddComponentData(entity, new EntityViewRequest { ViewKey = "goblin" });
 ```
 
+Without DI: construct `EntityViewRegistry` over your `IViewAssetProvider`, call
+`DotsViewBootstrap.Install(world, registry)`, and hand a `ChunkViewProvisioner` an
+`EntityViewCascade` as its sink — the `HybridViews` sample is exactly this.
+
 ## Installation
 
 ### Git URL
 
-Add to your project's `Packages/manifest.json`:
-
 ```json
-"com.cuvara.dots": "https://github.com/Cuvara/com.cuvara.dots.git#v0.6.2"
+"com.cuvara.dots": "https://github.com/Cuvara/UnityDots.git#v0.27.1"
 ```
 
-Or via **Window > Package Manager > + > Add package from git URL**:
+Or **Window › Package Manager › + › Add package from git URL**:
+`https://github.com/Cuvara/UnityDots.git#v0.27.1`.
 
-```
-https://github.com/Cuvara/com.cuvara.dots.git#v0.6.2
-```
+Optional packages are resolved by *your* manifest, not by this package's `package.json`:
+`com.cuvara.netcode` (`https://github.com/Cuvara/Netcode.git#v0.31.0`),
+`com.rpgmmo.shared-gamelogic` (`https://github.com/Cuvara/rpg-mmo-server.git?path=/backend/gameserver-dotnet/Shared.GameLogic#sgl-v0.3.0`),
+VContainer, MessagePipe, UniT, `com.unity.physics`.
 
 ### Embedded
 
@@ -216,47 +232,55 @@ Clone into your project's `Packages/com.cuvara.dots/` folder for local developme
 ### Running this package's tests in your project
 
 A git-URL install lands in `Library/PackageCache`, and **Unity does not compile a package's test
-assemblies unless the project asks for them**. Nothing warns you: the tests do not fail, they are
-simply absent — no `Cuvara.DOTS.Tests.*` assembly in `Library/ScriptAssemblies`, and the Test Runner
-filtered to `Cuvara.DOTS` reports *no tests found*, which reads exactly like a package with no tests.
-
-Add the package to `testables` in your project's `Packages/manifest.json`, as a sibling of
-`dependencies`:
+assemblies unless the project asks for them**. Nothing warns you: the tests are simply absent.
 
 ```json
 {
-  "dependencies": { "com.cuvara.dots": "https://github.com/Cuvara/com.cuvara.dots.git#v0.6.2" },
+  "dependencies": { "com.cuvara.dots": "https://github.com/Cuvara/UnityDots.git#v0.27.1" },
   "testables": [ "com.cuvara.dots" ]
 }
 ```
 
-The `testables` entry this package declares in its own `package.json` does **not** substitute for
-that: the consuming project's manifest is what makes the Test Runner build the assemblies.
+The `testables` entry in this package's own `package.json` does **not** substitute for that. An
+Editor that already resolved the package keeps its resolution cached until restart; verify by the
+presence of `Library/ScriptAssemblies/Cuvara.DOTS.Tests.Editor.dll`, not by the manifest edit.
 
-Editing the manifest is not always enough on its own — an Editor that has already resolved the
-package keeps its resolution cached, so the assemblies stay missing until the Editor is restarted.
-Verify by checking that `Library/ScriptAssemblies/Cuvara.DOTS.Tests.Editor.dll` exists, not by
-trusting the manifest edit.
+## Tested configurations
+
+Unity **6000.3.9f1**, Linux, Mono, EditMode + PlayMode, via `game-ci/unity-test-runner`. Three rows,
+each asserting a **test-count floor per assembly** (a green run over zero tests fails):
+
+| Row | Extra packages | Netcode/Prediction/GameLogic test assemblies |
+|---|---|---|
+| no optional packages | — | all three must be absent |
+| netcode absent | `sgl-v0.3.0` | GameLogic ≥ 41; Netcode/Prediction absent |
+| netcode present | `com.cuvara.netcode#v0.31.0`, `sgl-v0.3.0`, OpenUPM scope | Netcode ≥ 47, Prediction ≥ 19, GameLogic ≥ 41 |
+
+Not covered by any row: `Cuvara.DOTS.DI`, `Cuvara.DOTS.GameFoundation`, `Cuvara.DOTS.Physics`,
+`Cuvara.DOTS.Editor`, Android/IL2CPP, WebGL. There are **no measured performance figures** in this
+repository; the Stress Benchmark sample's tier list is configuration, not a result. Details and
+platform table: `Documentation~/SUPPORT-MATRIX.md`.
 
 ## Releasing
 
-Tagging is manual and deliberate — `npm publish` cannot be undone, so a bad version can only be
-superseded, never withdrawn.
+Tagging is manual and deliberate — `npm publish` cannot be undone.
 
 ```bash
-# 1. bump package.json, add the matching "## [X.Y.Z]" CHANGELOG section, merge to main
-# 2. wait for CI to be green on the commit you are about to tag
+# 1. bump package.json, rename "## [Unreleased]" to "## [X.Y.Z] - date" in CHANGELOG.md, merge to main
+# 2. wait for CI to be green on the commit you are about to tag (six Unity rows + validate)
 git tag vX.Y.Z && git push origin vX.Y.Z
 ```
 
 The tag triggers `release.yml`, which refuses to proceed unless `package.json` says exactly what the
 tag says, extracts the release notes from that CHANGELOG heading, creates the GitHub Release, and
-then publishes `@cuvara/dots@X.Y.Z` to GitHub Packages. `release-reminder.yml` warns on every push to
+publishes `@cuvara/dots@X.Y.Z` to GitHub Packages. `release-reminder.yml` warns on every push to
 `main` while the version in `package.json` has no tag.
 
-CI asserts a **test-count floor per assembly** rather than an exit code, in two configurations — with
-`com.cuvara.netcode` installed and without it. The reasoning, and why an exit code is not enough for a
-package whose test assemblies are gated on optional dependencies, is in `CHANGELOG.md` under 0.11.0.
+Consumers adopt a release by bumping the `#vX.Y.Z` in `Packages/manifest.json` **and committing
+the re-resolved `packages-lock.json` with it** — a manifest-only bump is ignored by every other
+machine. Never edit `Library/PackageCache`; roll back by restoring the previous manifest + lock
+pair. The full process, the assembly-gate rules and the compatibility-evidence format are in
+`Documentation~/RELEASE.md`; what each CI row proves is in `Documentation~/SUPPORT-MATRIX.md §4`.
 
 ## Requirements
 
@@ -271,19 +295,36 @@ Resolved automatically via `package.json`:
 | `com.unity.collections` | 2.6.8 |
 | `com.unity.mathematics` | 1.3.2 |
 
-Optional, and resolved by your project rather than by this package:
+Optional, resolved by your project:
 
 | Package | Enables | Define |
 |---|---|---|
-| `com.cuvara.netcode` **>= 0.19.0** | `Cuvara.DOTS.Netcode` — `IEntityView` over ECS | `CUVARA_NETCODE` |
-| `com.rpgmmo.shared-gamelogic` | `Cuvara.DOTS.GameLogic` | `CUVARA_SHARED_GAMELOGIC` |
-| VContainer | `Cuvara.DOTS.DI` | `CUVARA_DOTS_VCONTAINER` |
+| `com.cuvara.netcode` **≥ 0.31.0** | `Cuvara.DOTS.Netcode` (+ `.Prediction` with shared-gamelogic) | `CUVARA_NETCODE` |
+| `com.rpgmmo.shared-gamelogic` | `Cuvara.DOTS.GameLogic`, `Cuvara.DOTS.Netcode.Prediction` | `CUVARA_SHARED_GAMELOGIC` |
+| `jp.hadashikick.vcontainer` | `Cuvara.DOTS.DI` | `CUVARA_DOTS_VCONTAINER` |
+| `com.cysharp.messagepipe` | MessagePipe forwarding inside `Cuvara.DOTS.DI` | `CUVARA_DOTS_MESSAGEPIPE` |
+| UniT pooling + resources, UniTask | `Cuvara.DOTS.GameFoundation` | `CUVARA_DOTS_UNIT_*`, `CUVARA_DOTS_UNITASK` |
+| `com.unity.physics` ≥ 1.0.0 | `Cuvara.DOTS.Physics` | `CUVARA_DOTS_PHYSICS` |
+
+## Documentation
+
+| File | Contents |
+|---|---|
+| `Documentation~/SUPPORT-MATRIX.md` | Feature and module classification, tested configurations, platforms, corrections to earlier claims |
+| `Documentation~/OVERVIEW.md` | Architecture and key concepts |
+| `Documentation~/VIEW-PROVISIONING.md` | View lifecycle, `ViewConfig`, chunk provisioning, providers |
+| `Documentation~/NETCODE-INTEGRATION.md` | Adapter setup, components, interpolation, prediction |
+| `Documentation~/NETWORK-LIFECYCLE.md` | `NetworkEntitySpawned`/`Despawned` contract |
+| `Documentation~/MINIMAP-OVERLAY.md` | Minimap module, overlay consumer contract, 2D sorting decision |
+| `ROADMAP.md` | Done / in progress / planned, with classes |
+| `CHANGELOG.md` | Per-release detail |
 
 ## Conventions
 
 - `com.unity.jobs` is deprecated — it is merged into `com.unity.collections`.
 - Use `IJobEntity` or `SystemAPI.Query` instead of the obsolete `Entities.ForEach`.
 - Prefer unmanaged `ISystem` over managed `SystemBase`.
+- Every new Unity-visible file ships with its `.meta`; CI checks.
 
 ## License
 

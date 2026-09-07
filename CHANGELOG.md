@@ -7,6 +7,438 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Minimap producer, overlay consumer contract, 2D sorting decision (D08)
+
+The three features `SUPPORT-MATRIX.md` classified as data-contract-only in 0.27.1, resolved.
+Contract document: `Documentation~/MINIMAP-OVERLAY.md`.
+
+- **Minimap is a module.** `MinimapMarker { Category, IsLocal }` is the per-entity opt-in;
+  `MinimapDataSystem` (internal, `ViewTransformSyncGroup` after the transform sync) rebuilds
+  `MinimapBuffer.Entries` every frame from every marked entity with a `LocalToWorld` — a view is not
+  required, so an entity whose key is still warming is on the map at its true position with
+  `ViewId = 0`. `MinimapEntry` now carries `Entity` (index + version) as the stable identity and
+  `Category` (was `EntityTypeIndex`); `MinimapBuffer` gains `Plane` (`MinimapPlane.XZ`/`XY`, chosen
+  at install to match the world's `SnapshotSpaceMapping`) and `Version`.
+  `MinimapBootstrap.Install(world, plane, capacity, scope)` (module `Minimap`, Session by default)
+  allocates the native list and creates the system; `Uninstall` completes the producer's dependency,
+  releases the list, destroys singleton and system; `MinimapDataSystem.OnDestroy` releases the list
+  if the world is disposed first. Both go through one idempotent `ReleaseEntries`.
+- **The map shows only what the server replicated.** Nothing in the package marks an entity on its
+  own. On the netcode path `DotsEntityView` takes an optional `IMinimapCategoryResolver`
+  (`TypeMinimapCategoryResolver` keyed on the wire kind with a local-player override) and the drain
+  marks the mirror at spawn. A mirror exists exactly while the server lists the id, so an entity the
+  area of interest omitted has no marker and no entry, and no host code can widen that through the
+  interface.
+- **`ViewOverlaySystem` never produced an entry, in any version since 0.26.0.** Its query was
+  `EntityViewLink + ViewOverlayAnchor` while the collect job also reads `LocalToWorld`; Entities
+  refuses to schedule an `IJobEntity` over a custom query narrower than the job and throws
+  `InvalidOperationException` from inside the group update — logged, swallowed by the group, buffer
+  left empty. No test exercised the system until this branch's `ViewOverlayConsumerTests`, which
+  found it in the first EditMode run. The query now names `LocalToWorld`.
+- **No stale markers, either feed.** `MinimapDataSystem` requires only its buffer singleton, never a
+  non-empty query, so the frame the last marked entity disappears is the frame the buffer reads
+  zero. **`ViewOverlaySystem` had exactly the stale-entry bug this rule prevents:** it required at
+  least one anchored entity, stopped updating when the last one despawned, and left its final entries
+  in `ViewOverlayBuffer` for as long as the world lived. It now requires only the registry singleton,
+  clears on the empty frame and bumps a new `ViewOverlayBuffer.Version`.
+- **Overlay consumer contract, specified and implemented.** `ViewOverlayData` gains `Entity`.
+  `ViewOverlayProjection.Project(camera, world, maxDistance)` is the single world-to-screen rule:
+  the host owns the camera; behind-camera anchors are hidden, never mirrored; distance is measured
+  from the camera position and `≤ 0` disables the filter; off-screen-edge is still visible so plates
+  slide rather than pop; no camera reports `NoCamera`. `ViewOverlayReconciler<TElement>` over an
+  `IViewOverlayPresenter<TElement>` (Acquire / Place / Hide / Release, any UI type) keeps one element
+  per **entity** — not per `ViewId`, which changes when a view is recycled — acquires on first sight,
+  hides while behind/too far, releases the frame the entity leaves the buffer or the buffer is
+  released, and is gated on `Version` so calling it from `OnGUI` costs one comparison. `Runtime`
+  references no UI package.
+- **2D sorting stays unsupported, on purpose.** `ViewSortingKey` / `ViewConfig.Sorting*` remain
+  carried and unapplied: no consumer of the package renders sprites, a correct implementation needs a
+  per-view renderer lookup and a root/child/sorting-group decision only a real 2D prefab can answer,
+  and the value is a one-line write at spawn once one exists. Recorded in the component's remarks,
+  `SUPPORT-MATRIX.md`, `VIEW-PROVISIONING.md` and `MINIMAP-OVERLAY.md`.
+- **Sample.** `Samples~/HybridViews/HudOverlaysSample.cs` (add to the sample GameObject) anchors and
+  marks the sample's entities, installs the minimap module, and draws IMGUI labels through a
+  `ViewOverlayReconciler<Label>` plus a corner minimap with per-category colours; the header counts
+  acquires/releases so recycling is visible, and both feeds read zero after the last release step.
+- **Tests.** `Tests/Editor/MinimapModuleTests.cs` (19: install twice, uninstall twice, capacity
+  validation, reinstall, world disposal without uninstall, `UninstallAll` + dispose leaves no native
+  container, two worlds, scope conflict, spawn/move/despawn consistency, last-entity-gone clears
+  that frame, empty world, marker removed, XY plane, health fraction incl. zero max and clamp, growth
+  past capacity, independence from the view module, layout).
+  `Tests/Editor/ViewOverlayConsumerTests.cs` (13: producer spawn/move/despawn/empty incl. the stale
+  regression, view recycle keeps entity, projection in-front/behind/too-far/edge/no-camera,
+  reconciler acquire-once/place/release, version gating, hide-keeps-element, keyed by entity,
+  released buffer releases all, no camera). `Tests/Editor.Netcode/NetworkMinimapTests.cs` (4:
+  resolver marks only named kinds with category + locality, no resolver marks nothing, server
+  position + AOI exit removes the entry that frame, never-replicated cannot appear).
+  `ViewSystemGroupLayoutTests` roster gains `ViewOverlaySystem` and `MinimapDataSystem`.
+
+
+### Changed
+
+- **`DotsEntityView` enforces its single-producer rule (D10).** The first `IEntityView` call after
+  construction or after `BeginGeneration` latches the calling thread; a call from any other thread
+  throws `InvalidOperationException` instead of racing the unsynchronised `_live`/config caches
+  that the `ConcurrentQueue` never protected. `ProducerThreadId` exposes the latch.
+- **`ReconciliationAnchor` gained `Sequence` and `Tick`.** `Sequence` increments on every
+  authoritative state the drain writes (0 = spawn placeholder); `Tick` is the caller-stated server
+  tick from `SetStateAtTick`, 0 when unstated — never invented. Both are written only from the
+  command, so nothing predicted or rendered can reach the anchor.
+- **`LocalPredictionSystem` reconciles only on a new ack paired with a fresh anchor** (`Sequence`
+  changed since the last reconcile and non-zero). An ack that advanced while the drain has not yet
+  refreshed the anchor waits one frame rather than pairing the new tick with the previous
+  snapshot's position, and the spawn placeholder is never rewound to. Its ack/anchor memory resets
+  when `DotsEntityView.Generation` changes, so reconciliation is not silently disabled after a
+  reconnect to a server whose ticks are lower.
+- **`NetworkViewCommandSystem` refuses the second transform writer through the other method.** An
+  untimed `SetState` for an entity that already holds buffered samples (it is owned by
+  `RemoteInterpolationSystem`) writes the anchor and hp but leaves `LocalTransform` alone, counted
+  in `Metrics.MixedPathStates`. Previously it teleported the entity and fought the job.
+- `NetworkViewCommandSystem.Teardown` takes a `NetworkDespawnReason` (default `Teardown`).
+- `DotsEntityView` constructor gained `backlogWarningThreshold` (default 4096): one warning per
+  generation when the pending count reaches it. Diagnostics only; nothing is dropped or capped.
+
+### Added
+
+- **Session generations.** `DotsEntityView.BeginGeneration()` forgets every live id, bumps
+  `Generation` and enqueues a `Reset` command; every command carries the generation it was
+  enqueued under. The drain drops commands older than the view's current generation
+  (`Metrics.StaleCommandsDropped`) and, on the reset, tears down every mirror of the previous
+  generation with the new `NetworkDespawnReason.SessionReset` before applying the new session.
+  Old-session data still queued — or enqueued later by a stale producer — cannot respawn an old
+  entity, not even for a frame. `BeginGeneration` re-opens the producer latch so a new session may
+  drive the view from a new thread.
+- **`NetworkIngestionMetrics`** (`DotsEntityView.Metrics`): `Enqueued`, `Drained`,
+  `PendingHighWatermark`, `Drains`, `LastDrainCount`, `LastDrainSeconds`, `MaxDrainSeconds`,
+  `LastOldestCommandAgeSeconds`, `MaxOldestCommandAgeSeconds`, `StaleCommandsDropped`,
+  `RejectedSamples`, `MixedPathStates`, `GenerationResets`. The drain runs under the
+  `Cuvara.DOTS.NetworkViewCommandSystem.Drain` profiler marker. Measured before any bounding of the
+  queue is considered; the queue stays unbounded and fully drained per frame.
+- Tests: `SnapshotIngestionTests` (13) — duplicate and reordered ticks refused without a direct
+  write, mixed-path guard, generation reset with queued stale commands, late old-session data,
+  two resets before a drain, AOI re-entry with a fresh ring, drain metrics, 3000-command burst
+  drained in one frame, backlog warning, producer-thread latch and re-latch.
+  `PredictionOwnershipTests` (6) — reconnect re-enables reconciliation, ack ahead of the anchor
+  waits, placeholder never reconciled, timed states on the predicted entity never rendered by
+  interpolation, toggling prediction leaves no frame without a writer, anchor never fed from the
+  predicted position.
+- `Documentation~/NETCODE-INTEGRATION.md`: thread affinity, generations, ingestion metrics,
+  transform ownership and reconciliation inputs.
+
+### Changed
+
+- **`ChunkViewProvisioner` requires a cascade sink (breaking).** The `cascadeSink` constructor
+  parameter is no longer optional; passing `null` throws `ArgumentNullException`. A streaming world
+  passes `EntityViewCascade`; a context with no view layer says so explicitly with the new
+  `NullViewCascadeSink.Instance`. Releasing without a sink stranded every live view standing on the
+  released keys, and that hazard is now refused at construction instead of discovered at the first
+  unload. `Runtime.DI` and the HybridViews sample already passed a sink; only tests constructed
+  without one.
+- **`PooledViewAssetProvider` tracks identity per instance, not by name.** A lease table maps every
+  instance the provider created to its key, prefab-registration generation and acquired/pooled
+  state. `GameObject.name` is still set for the hierarchy view but nothing reads it back, so
+  renaming an instance no longer loses its pool. Return policies are now explicit: a duplicate
+  return is ignored (`DuplicateReleaseCount`) and can never enqueue the same object twice; a
+  foreign instance — one the provider did not create — is left untouched (`ForeignReleaseCount`)
+  where it used to be destroyed; an externally destroyed instance drops its lease
+  (`ExternallyDestroyedCount`).
+- **`PooledViewAssetProvider.Dispose` honours root ownership.** A caller-supplied `poolRoot` is
+  emptied of the provider's instances but never destroyed; only a root the provider created
+  (`poolRoot == null`, see `OwnsPoolRoot`) goes with it. Outstanding acquired instances are
+  reclaimed per the new `OutstandingLeasePolicy` (default `Destroy`; `Detach` transfers ownership
+  to the holder) and their count is logged as a warning — no silent tracking loss. Dispose is
+  idempotent; `RegisterPrefab`/`PrewarmAsync`/`Acquire`/`AcquireAsync` throw
+  `ObjectDisposedException` afterwards, while `ReleaseInstance`/`Release` are no-ops so a despawn
+  system that tears down after the pool does not throw.
+- **`PooledViewAssetProvider.RegisterPrefab` with a different prefab replaces the key.** Pooled
+  instances of the old prefab are destroyed and the key is un-warmed; acquired instances keep
+  running and are destroyed rather than pooled when returned. Re-registering the same prefab is a
+  no-op (previously every call silently overwrote).
+- **`PooledViewAssetProvider` honours `CancellationToken`.** `PrewarmAsync` and `AcquireAsync`
+  return a cancelled task before doing any work when the token is already cancelled, and prewarm
+  checks the token between instantiations; what was already created is tracked and pooled, so a
+  mid-loop cancel leaks nothing and leaves the key un-warm.
+- `ChunkViewProvisioner.ReleaseAll` gained an `includeSession` parameter (default `false`).
+- `ChunkState` documents its legal transitions; `Pending` is documented as reserved and never
+  emitted.
+
+### Added
+
+- `ChunkViewProvisioner` **epochs**: every `PrewarmChunkAsync` stamps the chunk with a fresh epoch
+  before awaiting, and the completion marks the chunk warm only if that epoch is still current. A
+  release or re-warm that lands mid-load makes the older completion a no-op — no `ChunkWarmed`, no
+  state change, no resurrected chunk.
+- `ChunkViewProvisioner` **failure and retry**: a prewarm that faults or is cancelled while its
+  epoch is current rolls the chunk back through the ordinary release path (cascade included), marks
+  the keys it tried to warm not-warm so the next requester re-issues the load, transitions the
+  chunk to the new `ChunkState.Failed` and removes it, then rethrows to the awaiting caller.
+  Retrying is a plain `PrewarmChunkAsync` with the same id. Counters reconcile on every path.
+- `ChunkViewProvisioner` **main-thread affinity**: every public member throws
+  `InvalidOperationException` when called off the constructing thread, including the post-await
+  continuation, so a provider completing on a worker thread without Unity's synchronization
+  context fails loudly instead of mutating the pool off-thread.
+- `ChunkViewProvisioner` **session-owned assets**: `PinSessionKeysAsync` / `ReleaseSessionKeys` /
+  `IsSessionPinned` hold references under the reserved id `ChunkViewProvisioner.SessionId` so no
+  chunk release can drop the last reference to a session-wide key; `ChunkCount` excludes the pin
+  and `ReleaseAll()` leaves it alone unless `includeSession: true`.
+- `NullViewCascadeSink` — the explicit, greppable "no view layer exists" sink.
+- `IPooledViewLifecycle` — narrow host hook (`OnAcquired` after activation, `OnReleased` before
+  deactivation) for resetting animator/particle/subscription state; optional constructor argument
+  on `PooledViewAssetProvider`.
+- `PooledViewAssetProvider` **admission budget**: `maxActivePerKey` constructor argument (0 =
+  unlimited). `maxPoolSize` bounds only *inactive* instances and never bounded the total; the
+  budget is the knob that does, and a refused `Acquire` returns `null` and increments
+  `AdmissionRejectedCount`.
+- `PooledViewAssetProvider` diagnostics: `TotalInstanceCount`, `IsDisposed`, `OwnsPoolRoot`,
+  `PoolRoot`, `MaxPoolSize`, `MaxActivePerKey`, `IsOwned`, `TryGetKey`, `IsAcquired`,
+  `SweepDestroyed()`.
+- `PooledViewAssetProvider.IsRegistered(key)` / `RegisteredKeys` — read-only registration query
+  for a `ViewConfigValidator` `prefabExists` callback; independent of warmth or instance counts.
+- Tests: `PooledViewAssetProviderOwnershipTests` (22) and `ChunkProvisioningEpochTests` (17) with a
+  `ManualViewAssetProvider` fake whose loads stay pending until the test settles them.
+- `Documentation~/VIEW-PROVISIONING.md`: ownership/disposal/cancellation contracts, pool cap
+  versus admission budget, chunk state machine and failure semantics.
+### Network lifecycle events are now published (D06)
+
+`NetworkEntitySpawned` and `NetworkEntityDespawned` were added in 0.27.0 as two structs and nothing
+in the package ever published them. They are now produced by the netcode adapter's drain system —
+the one place that holds the id → entity map and can therefore promise **exactly one spawn and one
+despawn per life of a replicated id**. Contract: `Documentation~/NETWORK-LIFECYCLE.md`.
+
+- **Network presence is not visual presence.** These events say a mirror entity exists / stopped
+  existing. `ViewSpawned`/`ViewDespawned` remain the visual lifecycle and are unchanged. An
+  area-of-interest exit is not a death — the wire does not distinguish exit from removal, and the new
+  `NetworkDespawnReason` (`Despawned`, `ExternalDestruction`, `Teardown`) reports only what the
+  adapter knows.
+- **Payload.** Both structs gain `Entity` (index **and** version) so a despawn can be matched to its
+  spawn after the entity is gone; `NetworkEntityDespawned` gains `IsLocal` and `Reason`. The 0.27.x
+  constructors still compile and carry `Entity.Null`.
+- **`NetworkEntityLifecycle`** (`Runtime.Netcode`), reached through `DotsEntityView.Lifecycle` or
+  passed to the view's new optional `lifecycle` constructor parameter. Synchronous delivery on the
+  drain's thread in command order; handlers in subscription order; a throwing handler is logged with
+  `Debug.LogException` and isolates nothing else; late subscription is not retroactive; subscribing
+  or disposing during dispatch takes effect from the next event; publishing is skipped entirely
+  while `HasObservers` is false, so an unobserved session allocates nothing. This is deliberately
+  narrower than a bus — two event types, one owner, no queue — and the 0.5.0 rule that the core
+  names no MessagePipe type still holds.
+- **Timing.** `Spawned` fires after every adapter-owned component is on the entity.
+  `Despawned(Despawned|Teardown)` fires **before** `DestroyEntity`, so a handler can read the last
+  transform for an effect. `Despawned(ExternalDestruction)` fires on the next command for an id whose
+  mirror something else destroyed; the entity no longer exists then, and the eventual wire despawn is
+  silent — one report per life.
+- **`DotsNetcodeBootstrap.Uninstall(world, destroyMirrors = false)`.** The default is 0.27.1's
+  behaviour byte for byte. `destroyMirrors: true` publishes one `Despawned(Teardown)` per id the
+  drain still holds, destroys the mirror entities and empties the map; a `Despawn` still queued in the
+  view is never applied afterwards, so there is no duplicate.
+- **"Destroyed" means `Exists && HasComponent<NetworkEntity>` is false, not `!Exists`.** A mirror
+  with a view carries `EntityViewLinkCleanup`, so an external `DestroyEntity` leaves a shell that
+  still `Exists` until presentation strips the cleanup; the drain runs before that and previously
+  mistook the shell for a live mirror (found by the lead's EditMode run of the two
+  external-destruction tests).
+- **The drain now recovers from an externally destroyed mirror on the next `Spawn` for that id**,
+  closing the first life with `ExternalDestruction` before opening the second. Before, such a spawn
+  was dropped and the id stayed invisible until it left and re-entered the area of interest.
+- **DI wiring**, optional: `RegisterDotsNetworkLifecycle()` in `Cuvara.DOTS.DI` (gated on
+  `CUVARA_NETCODE` as well as VContainer). With MessagePipe it registers publisher/subscriber
+  adapters for both events and a hub that forwards into them; without, the hub itself is the
+  `IDotsSubscriber<>`. `Cuvara.DOTS.DI` now references `Cuvara.DOTS.Netcode`, ignored when that
+  assembly is compiled out — the same arrangement it already has with `Cuvara.DOTS.GameLogic`.
+- **Consumer sample.** `Samples~/NetworkedPrediction/NetworkLifecycleLog.cs` subscribes both events,
+  counts presence, prints the last six with their reason in the overlay and Console, and the sample's
+  `OnDestroy` tears down with `destroyMirrors: true`.
+- **Tests.** `Tests/Editor.Netcode/NetworkLifecycleEventTests.cs` (15) drives the public groups with
+  the scripted sequences the contract lists — keyframe, delta, repeated keyframe, AOI exit/re-entry,
+  session reset, reconnect, external destruction, teardown with and without a queued despawn, throwing
+  subscriber, late subscriber, disposal, no-observer path. `NetworkEntityLifecycleTests.cs` (9)
+  covers the hub alone: dispatch order, forwarding, re-entrancy, error isolation.
+
+### Accurate feature and support matrix (D01)
+
+- **`Documentation~/SUPPORT-MATRIX.md`** classifies every feature as implemented / integrated in
+  client / sample-only / data-contract-only / planned, records per module the dependencies,
+  installation API, update groups, singleton requirements, ownership and teardown, lists the three
+  CI configurations with their floors, the platforms (Editor/Mono only; Android and WebGL
+  unverified), and states that **no measured performance figures exist** in this repository.
+- **`README.md` and `ROADMAP.md` rewritten from the tree.** The README's install URL had pointed at
+  `com.cuvara.dots.git#v0.6.2` for twenty releases and said the package was "not yet compiled
+  against a Unity Editor"; it now names `https://github.com/Cuvara/UnityDots.git#v0.27.1` and the CI
+  rows. The ROADMAP had not been updated since 0.7.0 and still listed the netcode adapter as planned.
+- **Corrections, recorded in `SUPPORT-MATRIX.md § 7`:** the 0.26.0 entry below lists a
+  `CollisionEventSystem` that **does not exist in the source** — `EntityCollision` and
+  `EntityTriggerEvent` have no producer; `MinimapBuffer`'s comment named a `MinimapDataSystem` that
+  does not exist (comment corrected, type marked data-contract-only); `VIEW-PROVISIONING.md` placed
+  `PrimitiveViewAssetProvider` in `Runtime/` (it is sample-only) and described `ViewSortingKey` as
+  applied (it is carried, not applied); the 0.27.0 "lifecycle events" entry added the structs only.
+- **`CameraFollowSystem` and `PhysicsMovementBridge` are documented as having no installer** —
+  both are `[DisableAutoCreation]` and no bootstrap creates them. Installers are in progress on
+  `feat/bootstrap-config` (D04).
+
+### Changed
+
+- **`com.cuvara.netcode` floor moves `0.19.0` → `0.31.0`** in the `versionDefines` of
+  `Cuvara.DOTS.Netcode`, `Cuvara.DOTS.Netcode.Prediction`, both test assemblies, the
+  `NetworkedPrediction` sample, and the new entry in `Cuvara.DOTS.DI`. 0.31.0 is the netcode release
+  the client is adopting; with an older netcode the adapter is absent rather than broken, as before.
+- **CI pins move with it**, as the workflow header requires: `com.cuvara.netcode`
+  `v0.19.0` → `v0.31.0` and `com.rpgmmo.shared-gamelogic` `sgl-v0.2.2` → `sgl-v0.3.0` (netcode
+  0.31.0's declared manual dependency).
+- `MessagePipeVContainer.RegisterMessage<T>` is `internal` rather than `private`, so the lifecycle
+  registration reuses it.
+- `NetworkViewCommandSystem`'s map value is now a `Mirror { Entity, Type, IsLocal }` rather than a
+  bare `Entity`, so a despawn event can be built after the entity is gone.
+
+### Added
+
+- **Module lifecycle (D04).** `Cuvara.DOTS.Modules`: `DotsModules` records every installed module
+  in the world (`DotsModuleRecord` entity, `DotsModuleScope.Root`/`Session`, uninstaller,
+  install count) — no static table, so a disposed world leaves no stale reference.
+  `UninstallScope`/`UninstallAll` tear modules down in reverse install order; two worlds keep
+  separate records. `RequireSingleton`/`RequireSystem`/`RequireFinite`/`RequireAtLeast` produce
+  actionable precondition errors.
+- **`SystemOrderVerifier`** walks the three Unity root groups recursively and reports every
+  `[UpdateInGroup]`/`[UpdateAfter]`/`[UpdateBefore]` the actual master update list violates
+  (wrong group, unsorted group, broken `OrderFirst`/`OrderLast`). `MembersInUpdateOrder` and
+  `Contains` for tests.
+- **`CameraFollowBootstrap`** — install/uninstall for the camera module; validates
+  `CameraFollowConfig` (finite offsets, `SmoothTime >= 0`, `MaxSpeed > 0`) before anything is
+  created; `IsInstalled`; replacing the config swaps the referenced instance.
+- **`PhysicsMovementBootstrap`** (`Runtime.Physics`) — install/uninstall for
+  `PhysicsMovementBridge`; warns, or throws with `requirePhysicsPipeline: true`, when the world
+  has no `PhysicsSystemGroup`.
+- **`DotsSimulationBootstrap.Uninstall`/`IsInstalled`**, and a `scope` parameter on install.
+- **`DotsViewBootstrap.IsInstalled`/`InstalledRegistry`**, and a `scope` parameter on `Install`.
+- **Configuration validation (D05).** `ViewConfigValidator` (`ValidateLibrary`, `ValidateConfig`,
+  `ValidateMappings`, `ValidatePreset`), `ViewConfigIssue` with stable codes,
+  `ViewConfigValidationReport`, `ViewConfigValidationException`. Catches empty/duplicate/overlong
+  keys (61 UTF-8 bytes), missing prefabs via a caller-supplied lookup, non-finite values, unknown
+  entity-type mappings and invalid preset values at runtime, before gameplay.
+- **`ViewConfigCatalog.TryBuild`/`BuildOrThrow`** gate a build on the report; a refused build
+  leaves the previous table installed. `Version`, `CreateRef`/`TryCreateRef`, `Uninstall`,
+  `IsInstalled`, `InstalledWorldCount`, `ViewKeys`.
+- **`ViewConfigRef.Version` / `ViewConfigTable.Version`.** The spawn path refuses a ref whose
+  version differs from the installed table's (including unstamped `new ViewConfigRef` — version 0)
+  and falls back to the request key with a warning naming the rebuild. An old index can no longer
+  resolve to a different view.
+- `NetworkViewCommand.ConfigVersion`; `DotsEntityView` stamps it and drops its name→index cache
+  when the catalog version changes.
+- `Documentation~/MODULE-LIFECYCLE.md`, `Documentation~/CONFIG-VALIDATION.md` (incl. the prefab
+  replacement contract for providers).
+- **Verification matrix (D13).** CI grows from three Unity rows to six: **physics present**
+  (`com.unity.physics` 1.4.7; `Tests.Physics ≥ 35`), **full stack** (netcode v0.31.0 +
+  sgl-v0.3.0 + VContainer 1.16.9 + MessagePipe 1.8.1 + UniTask 2.5.10; `Cuvara.DOTS.DI` and the
+  new `Tests.DI ≥ 5` must be present) and **GameFoundation present** (UniT pooling/resources;
+  `Cuvara.DOTS.GameFoundation` must compile). Every row runs
+  `.github/scripts/inventory_assemblies.py`, which lists each package assembly as present/absent
+  against the row's expectation (log, step summary, `artifacts/assemblies.md`) — an absent
+  assembly is a stated fact in every row. `assert_test_floors.py` now names the test assemblies
+  absent from the results (compiled out by design vs. missing) and writes a step-summary table.
+  Existing rows assert `Tests.Physics == 0` / `Tests.DI == 0` where those packages are absent;
+  the Editor floor rises 30 → 100. `SUPPORT-MATRIX.md §4` mirrors the rows and states each test
+  assembly's mode (EditMode/PlayMode), gate and coverage; §5 states what an Android IL2CPP or
+  WebGL row would need and that neither exists.
+- **`Cuvara.DOTS.Tests.DI`** (new, gated on `CUVARA_DOTS_VCONTAINER`): `RegisterDotsViews`
+  resolution (registry, provisioner, cascade, publishers), root-scope ownership, scope disposal
+  uninstalls the view module, world-before-container disposal, no-world warning.
+- **`DotsViewsLifetime`** (`Runtime.DI`): registered by `RegisterDotsViews`; disposing the
+  VContainer scope now calls `DotsViewBootstrap.Uninstall` on the world it installed into.
+- **`Documentation~/RELEASE.md` (D14):** branch → PR → tag with `package.json` bumped in the
+  tagged commit; consumer bumps manifest **and** `packages-lock.json` together; clean-consumer
+  check; rollback = restore the known manifest + lock pair, never `Library/PackageCache`;
+  `.meta`/asmdef-gate/migration-note/changelog expectations; the compatibility-evidence record
+  format. README `Releasing` points at it.
+- **Physics integration (D07, `Runtime.Physics`).** `PhysicsEventCollectorSystem` reads
+  Unity.Physics' collision and trigger streams (`ICollisionEventsJob`/`ITriggerEventsJob`,
+  `CollisionEvent.CalculateDetails`) after `PhysicsSimulationGroup` and resolves them through
+  `PhysicsContactTracker` into enter/stay/exit per entity pair: identity is the full `Entity`
+  (index **and** version — a recycled index is a new pair), pairs are canonically ordered
+  (`PhysicsPairKey`, normal from A toward B), several Unity events for one pair fold into one
+  (`ContactCount`, summed impulse, mean normal/position), exits are flagged
+  `AnyEntityDestroyed` when an entity is gone, output order is exits → enters → stays sorted by
+  pair. Results land in the `PhysicsEventBuffer` singleton and optional `IDotsPublisher`s;
+  `PhysicsEventsBootstrap` installs/uninstalls through `DotsModules`.
+- **`ColliderLibrary`** — explicit ownership of collider blobs: one blob per (shape, size,
+  filter, material), counted leases, `Release` frees at zero, `Dispose` frees all.
+  `PhysicsBodyFactory` gains library overloads (shared, library-owned) and explicit-blob overloads
+  (caller-owned); the overloads that silently allocated an unowned blob per body are gone.
+- **`PhysicsBodyValidation`** — shape dimensions (incl. capsule height ≥ 2·radius), finite
+  positive mass, non-empty collision filter, `AssertSingleIntegrator`. `PhysicsBodyFactory`
+  validates through it and adds `PhysicsWorldIndex` (previously missing — bodies were invisible
+  to `BuildPhysicsWorld`) and `TriggerMaterial()`/`CollisionEventMaterial()` helpers.
+- **One-integrator rule.** New core tag `PhysicsDrivenMovement`: `MoveBounceSystem` and
+  `MoveTowardSystem` exclude it, `PhysicsMovementBridge` requires it, `PhysicsBodyFactory` adds
+  it to dynamic and kinematic bodies. An entity is moved by the direct movers or by Unity.Physics,
+  never both. `Documentation~/PHYSICS.md` (semantics, fixed-step timing, prediction interaction,
+  client-only scope).
+- Tests (`Tests/Editor.Physics`): `PhysicsContactTrackerTests` (11), `ColliderLibraryTests` (6),
+  `PhysicsBodyFactoryTests` (10, incl. the one-integrator test through `SimulationSystemGroup`),
+  `PhysicsEventsBootstrapTests` (8, incl. Unity.Physics stepped in a test world: trigger
+  enter/stay/exit, destroyed entity + reused index, aggregated collision with A→B normal,
+  install/step/uninstall cycles returning collider leases to zero).
+- **Camera behaviour and lifecycle (D09).** `CameraFollowMath` — the follow step as a pure
+  function: a `float3` port of `Vector3.SmoothDamp` (held to 1e-4 against Unity's in tests) plus
+  a hard `MaxSpeed * dt` per-frame clamp so `MaxSpeed` means what it says; `dt <= 0` holds
+  (paused frames never jump); non-finite targets hold, a non-finite camera recovers by snapping.
+  `CameraFollowConfig` gains `Camera` (supplied camera; null = `Camera.main`),
+  `MultipleTargets` (`HoldAndReport` | `FollowLowestIndex`), `TargetSwitch` (`Snap` | `Smooth`)
+  and `TeleportDistance` (snap beyond it; 0 disables). `CameraFollowSystem` never calls
+  `GetSingleton` on the target query; first frame and target switches snap under the default
+  policy; `ResetSmoothing()` / `CameraFollowBootstrap.ResetSmoothing(world)` for reconnect;
+  `Velocity`/`CurrentTarget` diagnostics; a destroyed target or supplied camera idles the system
+  with finite values. `Documentation~/CAMERA-FOLLOW.md`.
+- Tests: `CameraFollowMathTests` (Unity parity, MaxSpeed at extreme distance, zero/negative/NaN
+  dt, zero SmoothTime, force snap, teleport radius, no overshoot, 30/60/144 Hz, random deltas,
+  non-finite inputs); `CameraFollowBootstrapTests` extended with a real edit-mode camera
+  (supplied camera + first-frame snap, both multi-target policies, both switch policies,
+  teleport, reset, zero dt, destroyed target, destroyed camera, order after interpolation/sync).
+- Tests: `DotsModulesTests`, `SystemOrderVerifierTests`, `DotsViewBootstrapLifecycleTests`,
+  `CameraFollowBootstrapTests`, `DotsSimulationBootstrapTests`, `ViewConfigValidatorTests`,
+  `ViewConfigCatalogVersionTests`, extended `ArchetypeFactoryTests`; new
+  `Tests/Editor.Physics` assembly with `PhysicsMovementBootstrapTests` (gated on
+  `com.unity.physics`).
+
+### Changed
+
+- **`DotsViewBootstrap.Uninstall`** now hands every linked entity its `EntityViewRequest` back
+  (and strips `EntityViewLink`/`ViewTransformOffset`/`ViewSortingKey`/`EntityViewLinkCleanup`)
+  so a reinstall respawns them; **`Install` with a different registry** does the same before
+  swapping, so no entity keeps a handle into a replaced registry and no view exists twice.
+- **`ViewConfigCatalog.Build`** re-publishes the new blob into every world the catalog is
+  installed in, so no singleton points at the freed previous blob; `Dispose` removes the
+  singleton from those worlds.
+- **`RegisterDotsMessaging` with MessagePipe installed but no broker registered** for a package
+  message now resolves the no-op publisher and warns once per type, instead of failing the
+  container build with `No such registration of type: IPublisher<T>`. Subscribers still require
+  the broker.
+- Every bootstrap that installs into `SimulationSystemGroup` (`DotsViewBootstrap.InstallSystems`,
+  `DotsSimulationBootstrap`, `PhysicsMovementBootstrap`) now creates `TransformSystemGroup` there
+  when it is absent, so `GameplaySystemGroup`'s `[UpdateBefore(TransformSystemGroup)]` is applied
+  in hand-built worlds instead of being dropped with a warning.
+- `CameraFollowBootstrap.InstallSystems` installs the full view group tree
+  (`DotsViewBootstrap.InstallSystems`) rather than only the two groups the camera orders against;
+  a partial tree made Entities drop `ViewTransformSyncGroup`'s ordering with a warning.
+- `CameraFollowSystem` reports (once) and skips when the number of `CameraFollowTarget` entities
+  is not exactly one, instead of throwing from `GetSingleton` every frame. **`MaxSpeed` semantics
+  changed** from Unity's spring-distance clamp to a hard per-frame speed limit (see D09 above); a
+  camera tuned against the old behaviour may need a higher `MaxSpeed`.
+- `ViewOverlaySystem.OnDestroy` completes its dependency before disposing the overlay list and
+  nulls the list on the buffer so disposal is observable.
+- `ArchetypeFactory.Create`/`CreateBatch` throw on a null preset or uncreated containers.
+- **Breaking (physics, pre-release):** `EntityCollision`/`EntityTriggerEvent` now carry `Entity`
+  (`EntityA`/`EntityB`), `Phase`, and for collisions `ContactCount`; the int-only constructors are
+  gone (`EntityIndexA/B` remain as properties, `EntityTriggerEvent.Entered` as a view of `Phase`).
+  `PhysicsBodyFactory.Add*Body(em, entity, shape, size[, mass])` replaced by library / explicit-blob
+  overloads; `CreateCollider` gains a `Material` parameter and validates. `PhysicsMovementBridge`
+  only drives entities tagged `PhysicsDrivenMovement`.
+- README: view-configuration snippet uses `catalog.CreateRef`; system-group tree lists
+  `ViewOverlaySystem` and `CameraFollowSystem`; new "Modules" section.
+
+### Migration
+
+- Replace `new ViewConfigRef { Index = i }` with `catalog.CreateRef(i)` (or `TryCreateRef(name)`).
+  Unstamped refs are refused and fall back to the request's own key, with a warning.
+- Optional: install the camera through `CameraFollowBootstrap.Install` instead of creating
+  `CameraFollowSystem` and its singleton by hand.
+
 ## [0.27.1] - 2026-09-06
 
 ### Fixed

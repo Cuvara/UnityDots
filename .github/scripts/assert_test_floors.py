@@ -92,6 +92,28 @@ def parse_spec(raw):
     raise SystemExit(f"::error::Unparseable spec {raw!r}; expected Assembly>=N or Assembly==N")
 
 
+def write_step_summary(per_assembly, specs, absent_lines, failures):
+    """Append a markdown table to $GITHUB_STEP_SUMMARY, when running under Actions."""
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    lines = ["### Test floors", "", "| Assembly | Executed | Floor | Verdict |", "|---|---|---|---|"]
+    for assembly, op, expected in specs:
+        actual = sum(per_assembly.get(assembly, {}).values())
+        ok = actual >= expected if op == ">=" else actual == expected
+        lines.append(f"| `{assembly}` | {actual} | {op} {expected} | {'pass' if ok else '**FAIL**'} |")
+    extra = sorted(set(per_assembly) - {spec[0] for spec in specs})
+    for assembly in extra:
+        lines.append(f"| `{assembly}` | {sum(per_assembly[assembly].values())} | (no floor) | observed |")
+    if absent_lines:
+        lines += ["", "Absent test assemblies:", ""]
+        lines += [f"- `{assembly}` — {note}" for assembly, note in absent_lines]
+    if failures:
+        lines += ["", "Failures:", ""] + [f"- {failure}" for failure in failures]
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n\n")
+
+
 def main(argv):
     if len(argv) < 3:
         raise SystemExit("usage: assert_test_floors.py <results-dir> <Assembly>=N> [...]")
@@ -147,6 +169,7 @@ def main(argv):
         actual = sum(per_assembly.get(assembly, {}).values())
         ok = actual >= expected if op == ">=" else actual == expected
         print(f"  {'PASS' if ok else 'FAIL'}  {assembly} {op} {expected}   (actual {actual})")
+
         if not ok:
             if op == ">=" and actual == 0:
                 failures.append(
@@ -159,6 +182,26 @@ def main(argv):
                 )
             else:
                 failures.append(f"{assembly} ran {actual} test case(s), required {op} {expected}")
+
+    # Absent test assemblies, stated rather than implied. An `==0` spec met by an
+    # absent assembly is the gate confirming a defineConstraint fired; a `>=` spec
+    # with actual 0 is the assembly vanishing. Both print the same "actual 0" above,
+    # and only this block tells them apart in the log.
+    print("\nTest assemblies absent from the results:")
+    absent_lines = []
+    for assembly, op, expected in specs:
+        if assembly in per_assembly:
+            continue
+        if op == "==" and expected == 0:
+            note = "compiled out by its defineConstraints — expected in this row"
+        else:
+            note = "MISSING — its floor requires it to have run"
+        print(f"  {assembly:34} {note}")
+        absent_lines.append((assembly, note))
+    if not absent_lines:
+        print("  (none — every assembly named by a floor produced results)")
+
+    write_step_summary(per_assembly, specs, absent_lines, failures)
 
     if failures:
         print()

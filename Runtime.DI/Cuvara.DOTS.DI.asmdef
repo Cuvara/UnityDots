@@ -4,6 +4,7 @@
     "references": [
         "Cuvara.DOTS.Runtime",
         "Unity.Entities",
+        "Cuvara.DOTS.Netcode",
         "Unity.Collections",
         "Unity.Mathematics",
         "VContainer",
@@ -36,6 +37,11 @@
             "name": "com.cysharp.messagepipe",
             "expression": "",
             "define": "CUVARA_DOTS_MESSAGEPIPE"
+        },
+        {
+            "name": "com.cuvara.netcode",
+            "expression": "0.31.0",
+            "define": "CUVARA_NETCODE"
         }
     ],
     "noEngineReferences": false

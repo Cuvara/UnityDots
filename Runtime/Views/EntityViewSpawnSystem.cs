@@ -151,8 +151,24 @@ namespace Cuvara.DOTS.Views
             if (!entityManager.HasComponent<ViewConfigRef>(entity)) return false;
             if (!tableRef.Table.IsCreated) return false;
 
-            var index = entityManager.GetComponentData<ViewConfigRef>(entity).Index;
+            var configRef = entityManager.GetComponentData<ViewConfigRef>(entity);
+            var index = configRef.Index;
             ref var table = ref tableRef.Table.Value;
+
+            // Version first, range second: a stale ref is a stale ref whether or not its index still
+            // happens to be in range, and the in-range case is the one that used to spawn the wrong
+            // archetype silently.
+            if (configRef.Version != table.Version)
+            {
+                UnityEngine.Debug.LogWarning(
+                    $"[Cuvara.DOTS] ViewConfigRef (index {index}, version {configRef.Version}) does not match the installed " +
+                    $"config table (version {table.Version}); falling back to the request's own view key. " +
+                    (configRef.Version == 0
+                        ? "A ref built with `new` is unstamped — issue refs with ViewConfigCatalog.CreateRef."
+                        : "The catalog was rebuilt; re-resolve refs with ViewConfigCatalog.CreateRef after a rebuild."));
+                return false;
+            }
+
             if (index < 0 || index >= table.Records.Length)
             {
                 UnityEngine.Debug.LogWarning(

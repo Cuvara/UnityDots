@@ -8,18 +8,28 @@ using UnityEngine;
 namespace Cuvara.DOTS.Views
 {
     /// <summary>
-    /// Smoothly follows the entity tagged with <see cref="CameraFollowTarget"/> using
-    /// <c>Camera.main</c>. Runs in <see cref="ViewSystemGroup"/> after transform sync
-    /// so the camera sees the final rendered position.
+    /// Follows the entity tagged with <see cref="CameraFollowTarget"/> with the camera named by
+    /// <see cref="CameraFollowConfig"/> (or <c>Camera.main</c>). Runs in <see cref="ViewSystemGroup"/>
+    /// after <see cref="ViewTransformSyncGroup"/>, which is after interpolation and lifecycle, so
+    /// the camera sees the position that was actually rendered this frame — interpolated for a
+    /// remote entity, predicted for the local one.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Not Bursted — it touches <c>Camera.main</c> (managed UnityEngine object).
-    /// Not parallelisable — there is one camera.
+    /// Not Bursted — it touches a managed <see cref="Camera"/>. Not parallelisable — one camera.
+    /// The arithmetic lives in <see cref="CameraFollowMath"/>, pure and tested without a camera.
     /// </para>
     /// <para>
-    /// Uses smooth damp (exponential decay) rather than lerp, so the camera converges
-    /// at a speed independent of frame rate.
+    /// <b>Behaviour at the edges is a policy, not an exception.</b> No target: the system does
+    /// not update (<c>RequireForUpdate</c>) and the camera holds where it is — a destroyed target
+    /// leaves finite values behind. Several targets: <see cref="CameraFollowConfig.MultipleTargets"/>.
+    /// Target changed: <see cref="CameraFollowConfig.TargetSwitch"/>. Target far away:
+    /// <see cref="CameraFollowConfig.TeleportDistance"/>. Zero delta time: the pose is unchanged.
+    /// After a reconnect, <see cref="ResetSmoothing"/> (or <see cref="CameraFollowBootstrap.ResetSmoothing"/>)
+    /// drops the spring so the first frame snaps rather than swings.
+    /// </para>
+    /// <para>
+    /// Installed and removed by <see cref="CameraFollowBootstrap"/>, never by hand.
     /// </para>
     /// </remarks>
     [DisableAutoCreation]
@@ -29,6 +39,26 @@ namespace Cuvara.DOTS.Views
     {
         private EntityQuery _targetQuery;
         private float3 _velocity;
+        private Entity _lastTarget = Entity.Null;
+        private bool _snapNext = true;
+        private bool _reportedTargetCount;
+
+        /// <summary>Spring velocity carried between frames. Diagnostic; zero after a snap or reset.</summary>
+        public float3 Velocity => _velocity;
+
+        /// <summary>The entity followed last frame, or <see cref="Entity.Null"/>.</summary>
+        public Entity CurrentTarget => _lastTarget;
+
+        /// <summary>
+        /// Drops the spring state so the next update snaps to the target instead of damping from
+        /// wherever the camera was. Call after a reconnect, a scene load or an explicit teleport the
+        /// <see cref="CameraFollowConfig.TeleportDistance"/> policy would not catch.
+        /// </summary>
+        public void ResetSmoothing()
+        {
+            _velocity = float3.zero;
+            _snapNext = true;
+        }
 
         protected override void OnCreate()
         {
@@ -42,59 +72,96 @@ namespace Cuvara.DOTS.Views
 
         protected override void OnUpdate()
         {
-            var camera = Camera.main;
+            var config = SystemAPI.ManagedAPI.GetSingleton<CameraFollowConfig>();
+
+            // A supplied camera that was destroyed is a Unity "fake null": the reference compares
+            // equal to null and the system idles until the consumer supplies another or clears it.
+            var camera = config.Camera != null ? config.Camera : Camera.main;
             if (camera == null) return;
 
-            var config = SystemAPI.ManagedAPI.GetSingleton<CameraFollowConfig>();
-            var targetPos = _targetQuery.GetSingleton<LocalToWorld>().Position;
+            if (!TryResolveTarget(config, out var targetEntity, out var targetPos)) return;
 
-            var desiredPos = targetPos + config.Offset;
-            var currentPos = (float3)camera.transform.position;
+            // A target change is a switch, and the switch policy decides whether the spring carries
+            // over. The very first frame is also a switch (from nothing), so it always snaps: a
+            // camera that starts at the scene origin must not glide to the player on load.
+            var switched = targetEntity != _lastTarget;
+            _lastTarget = targetEntity;
+            var forceSnap = _snapNext || (switched && config.TargetSwitch == CameraFollowSwitchPolicy.Snap);
+            _snapNext = false;
 
-            float3 newPos;
-            if (config.SmoothTime <= 0f)
-            {
-                newPos = desiredPos;
-            }
-            else
-            {
-                newPos = SmoothDamp(currentPos, desiredPos, ref _velocity,
-                    config.SmoothTime, config.MaxSpeed, SystemAPI.Time.DeltaTime);
-            }
+            var pose = CameraFollowMath.Step(
+                camera.transform.position,
+                ref _velocity,
+                targetPos,
+                config.Offset,
+                config.LookAtOffset,
+                config.SmoothTime,
+                config.MaxSpeed,
+                config.TeleportDistance,
+                forceSnap,
+                SystemAPI.Time.DeltaTime);
 
-            camera.transform.position = newPos;
-            camera.transform.LookAt(
-                (Vector3)(targetPos + config.LookAtOffset),
-                Vector3.up);
+            if (pose.Held) return;
+
+            camera.transform.position = pose.Position;
+            camera.transform.LookAt((Vector3)pose.LookAt, Vector3.up);
         }
 
-        private static float3 SmoothDamp(float3 current, float3 target, ref float3 velocity,
-            float smoothTime, float maxSpeed, float dt)
+        /// <summary>
+        /// Picks the followed entity under the multi-target policy. False means "hold this frame".
+        /// </summary>
+        private bool TryResolveTarget(CameraFollowConfig config, out Entity target, out float3 position)
         {
-            smoothTime = math.max(0.0001f, smoothTime);
-            float omega = 2f / smoothTime;
-            float x = omega * dt;
-            float exp = 1f / (1f + x + 0.48f * x * x + 0.235f * x * x * x);
+            target = Entity.Null;
+            position = float3.zero;
 
-            float3 diff = current - target;
-            float maxDist = maxSpeed * smoothTime;
+            var count = _targetQuery.CalculateEntityCount();
+            if (count == 0) return false;
 
-            float magSq = math.lengthsq(diff);
-            if (magSq > maxDist * maxDist)
-                diff = diff / math.sqrt(magSq) * maxDist;
-
-            float3 temp = (velocity + omega * diff) * dt;
-            velocity = (velocity - omega * temp) * exp;
-            float3 result = target + (diff + temp) * exp;
-
-            // Prevent overshooting
-            if (math.dot(target - current, result - target) > 0)
+            if (count == 1)
             {
-                result = target;
-                velocity = float3.zero;
+                _reportedTargetCount = false;
+                target = _targetQuery.GetSingletonEntity();
+                position = _targetQuery.GetSingleton<LocalToWorld>().Position;
+                return CameraFollowMath.IsFinite(position);
             }
 
-            return result;
+            if (config.MultipleTargets == CameraFollowMultiTargetPolicy.HoldAndReport)
+            {
+                if (!_reportedTargetCount)
+                {
+                    _reportedTargetCount = true;
+                    Debug.LogError(
+                        $"[Cuvara.DOTS] CameraFollowSystem found {count} entities tagged CameraFollowTarget; " +
+                        "exactly one is expected. Remove the tag from every entity but the local player, or set " +
+                        "CameraFollowConfig.MultipleTargets = FollowLowestIndex. The camera holds still until then. " +
+                        "This is reported once.");
+                }
+
+                return false;
+            }
+
+            // FollowLowestIndex: deterministic across frames as long as the set does not change, and
+            // the previously followed entity keeps priority while it is still tagged so a second tag
+            // appearing does not yank the camera.
+            using var entities = _targetQuery.ToEntityArray(Allocator.Temp);
+            using var transforms = _targetQuery.ToComponentDataArray<LocalToWorld>(Allocator.Temp);
+
+            var chosen = -1;
+            for (var i = 0; i < entities.Length; i++)
+            {
+                if (entities[i] == _lastTarget)
+                {
+                    chosen = i;
+                    break;
+                }
+
+                if (chosen < 0 || entities[i].Index < entities[chosen].Index) chosen = i;
+            }
+
+            target = entities[chosen];
+            position = transforms[chosen].Position;
+            return CameraFollowMath.IsFinite(position);
         }
     }
 }

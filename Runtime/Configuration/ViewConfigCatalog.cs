@@ -22,10 +22,20 @@ namespace Cuvara.DOTS.Configuration
     /// <see cref="ViewConfigTableReference"/> is destroyed with it, so nothing is left pointing at
     /// freed memory.
     /// </para>
+    /// <para>
+    /// <b>Versioned, not immutable</b> (see <c>Documentation~/CONFIG-VALIDATION.md</c>). Every
+    /// <see cref="Build"/> increments <see cref="Version"/>, stamps it into the blob, and re-publishes
+    /// the new table into every world the catalog is installed in — so no singleton is ever left
+    /// pointing at the freed previous blob. A <see cref="ViewConfigRef"/> carries the version it was
+    /// issued at, and the spawn path refuses one from any other version. An old index therefore
+    /// cannot resolve to a different view: it resolves to nothing and the entity falls back to its
+    /// own request key, with a warning naming the rebuild.
+    /// </para>
     /// </remarks>
     public sealed class ViewConfigCatalog : IDisposable
     {
         private readonly Dictionary<string, int> _indexByName = new Dictionary<string, int>();
+        private readonly List<World> _installedWorlds = new List<World>();
         private BlobAssetReference<ViewConfigTable> _table;
         private ViewConfigRecord[] _records = Array.Empty<ViewConfigRecord>();
 
@@ -34,6 +44,22 @@ namespace Cuvara.DOTS.Configuration
 
         /// <summary>The built blob. Not valid before <see cref="Build"/>.</summary>
         public BlobAssetReference<ViewConfigTable> Table => _table;
+
+        /// <summary>
+        /// Incremented by every <see cref="Build"/>; 0 before the first. The value a
+        /// <see cref="ViewConfigRef"/> must carry to resolve against the current table.
+        /// </summary>
+        public int Version { get; private set; }
+
+        /// <summary>Worlds this catalog is currently published into. Disposed worlds are pruned lazily.</summary>
+        public int InstalledWorldCount
+        {
+            get
+            {
+                PruneDisposedWorlds();
+                return _installedWorlds.Count;
+            }
+        }
 
         /// <summary>
         /// Builds the blob from a library. A later call replaces the previous blob and disposes it.
@@ -48,12 +74,12 @@ namespace Cuvara.DOTS.Configuration
         /// a crash pointing at this line. The caller owns that sequencing; the package cannot detect it.
         /// </para>
         /// <para>
-        /// <b>A rebuild also invalidates every index handed out before it.</b> Indices are positions
-        /// in the new record list, so an entity still carrying a <see cref="ViewConfigRef"/> from
-        /// before a rebuild may now name a different archetype, or none. Re-resolve names to indices
-        /// after rebuilding — the spawn path warns and falls back to the request's own key for an
-        /// out-of-range index, but an index that is merely *wrong* rather than out of range cannot be
-        /// detected.
+        /// <b>A rebuild also invalidates every ref handed out before it</b> — deliberately and
+        /// detectably. <see cref="Version"/> increments, the new table carries it, and a
+        /// <see cref="ViewConfigRef"/> stamped with the old version is refused by the spawn path,
+        /// which falls back to the request's own key and warns. Re-issue refs with
+        /// <see cref="CreateRef(int)"/> after rebuilding. Worlds the catalog is installed in are
+        /// re-published automatically, so the singleton never points at the freed blob.
         /// </para>
         /// <para>
         /// Entries with no config, no name, or a duplicate name are skipped with a warning rather
@@ -88,7 +114,85 @@ namespace Cuvara.DOTS.Configuration
             }
 
             _records = records.ToArray();
+            Version++;
             Rebuild();
+            Republish();
+        }
+
+        /// <summary>
+        /// Validates the library first and builds only when the report has no errors. On failure the
+        /// catalog is left exactly as it was — a previously built table stays installed and valid.
+        /// </summary>
+        /// <param name="prefabExists">See <see cref="ViewConfigValidator.ValidateLibrary(ViewArchetypeLibrary, Func{string, bool})"/>.</param>
+        /// <returns>True when the catalog was (re)built.</returns>
+        public bool TryBuild(ViewArchetypeLibrary library, out ViewConfigValidationReport report, Func<string, bool> prefabExists = null)
+        {
+            report = ViewConfigValidator.ValidateLibrary(library, prefabExists);
+            if (report.HasErrors) return false;
+
+            Build(library);
+            return true;
+        }
+
+        /// <summary>
+        /// <see cref="TryBuild"/> that throws a <see cref="ViewConfigValidationException"/> listing
+        /// every issue when the library is invalid. Warnings are logged and do not throw.
+        /// </summary>
+        public ViewConfigValidationReport BuildOrThrow(ViewArchetypeLibrary library, Func<string, bool> prefabExists = null)
+        {
+            if (!TryBuild(library, out var report, prefabExists)) throw new ViewConfigValidationException(report);
+            if (report.WarningCount > 0) report.Log();
+            return report;
+        }
+
+        /// <summary>
+        /// A <see cref="ViewConfigRef"/> for the record at <paramref name="index"/>, stamped with the
+        /// current <see cref="Version"/>. The only supported way to make one.
+        /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">The index is not in the built table.</exception>
+        /// <exception cref="InvalidOperationException">The catalog has not been built.</exception>
+        public ViewConfigRef CreateRef(int index)
+        {
+            if (Version == 0) throw new InvalidOperationException("[Cuvara.DOTS] Build must be called before CreateRef.");
+            if (index < 0 || index >= _records.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(index), index,
+                    $"[Cuvara.DOTS] The catalog has {_records.Length} record(s); index {index} names none of them.");
+            }
+
+            return new ViewConfigRef { Index = index, Version = Version };
+        }
+
+        /// <summary>A stamped ref for a named archetype. False when the name is not in the catalog.</summary>
+        public bool TryCreateRef(string archetypeName, out ViewConfigRef configRef)
+        {
+            var index = IndexOf(archetypeName);
+            if (index < 0 || Version == 0)
+            {
+                configRef = default;
+                return false;
+            }
+
+            configRef = CreateRef(index);
+            return true;
+        }
+
+        /// <summary>Every distinct view key in the catalog.</summary>
+        /// <remarks>
+        /// Diff two of these across a rebuild to learn which prefabs the provider may drop and which
+        /// it must keep — the catalog side of the prefab-replacement contract in
+        /// <c>Documentation~/CONFIG-VALIDATION.md</c>.
+        /// </remarks>
+        public HashSet<string> ViewKeys()
+        {
+            var result = new HashSet<string>();
+            foreach (var record in _records)
+            {
+                var key = record.ViewKey.ToString();
+                if (!string.IsNullOrEmpty(key)) result.Add(key);
+            }
+
+            return result;
         }
 
         /// <summary>Index of a named archetype, or -1. Resolve once and carry the index.</summary>
@@ -154,15 +258,94 @@ namespace Cuvara.DOTS.Configuration
                 entityManager.SetComponentData(entity, new ViewConfigTableReference { Table = _table });
             }
 
+            if (!_installedWorlds.Contains(world)) _installedWorlds.Add(world);
             return entity;
         }
 
+        /// <summary>
+        /// Removes the table singleton from <paramref name="world"/> and forgets the world. Safe when
+        /// never installed there, and safe twice. Does not dispose the blob — other worlds may still
+        /// be reading it.
+        /// </summary>
+        public void Uninstall(World world)
+        {
+            _installedWorlds.Remove(world);
+            if (world == null || !world.IsCreated) return;
+
+            var entityManager = world.EntityManager;
+            using var query = entityManager.CreateEntityQuery(ComponentType.ReadWrite<ViewConfigTableReference>());
+            if (!query.IsEmpty) entityManager.DestroyEntity(query);
+        }
+
+        /// <summary>Whether this catalog's table is published in <paramref name="world"/>.</summary>
+        public bool IsInstalled(World world)
+        {
+            PruneDisposedWorlds();
+            return world != null && world.IsCreated && _installedWorlds.Contains(world);
+        }
+
+        /// <summary>
+        /// Frees the blob and removes the singleton from every world it was published into, so no
+        /// world is left holding a reference to freed memory. Idempotent.
+        /// </summary>
+        /// <remarks>
+        /// Only safe between frames, for the reason <see cref="Build"/> documents: a system reading
+        /// the table while it is freed is undefined behaviour. The client wiring disposes the catalog
+        /// after uninstalling the systems that read it, and that order is the contract.
+        /// </remarks>
         public void Dispose()
         {
+            for (var i = _installedWorlds.Count - 1; i >= 0; i--)
+            {
+                var world = _installedWorlds[i];
+                if (world == null || !world.IsCreated) continue;
+
+                using var query = world.EntityManager.CreateEntityQuery(ComponentType.ReadWrite<ViewConfigTableReference>());
+                if (!query.IsEmpty) world.EntityManager.DestroyEntity(query);
+            }
+
+            _installedWorlds.Clear();
+
             if (_table.IsCreated) _table.Dispose();
             _table = default;
             _records = Array.Empty<ViewConfigRecord>();
             _indexByName.Clear();
+        }
+
+        /// <summary>
+        /// Points every installed world's singleton at the freshly built blob. Called from
+        /// <see cref="Build"/>, after the old blob is gone — which is why it has to happen inside the
+        /// same call rather than being left to the consumer.
+        /// </summary>
+        private void Republish()
+        {
+            PruneDisposedWorlds();
+            for (var i = _installedWorlds.Count - 1; i >= 0; i--)
+            {
+                var world = _installedWorlds[i];
+                using var query = world.EntityManager.CreateEntityQuery(ComponentType.ReadWrite<ViewConfigTableReference>());
+                if (query.IsEmpty)
+                {
+                    // The consumer destroyed the singleton themselves; treat as uninstalled.
+                    _installedWorlds.RemoveAt(i);
+                    continue;
+                }
+
+                world.EntityManager.SetComponentData(query.GetSingletonEntity(), new ViewConfigTableReference { Table = _table });
+            }
+        }
+
+        /// <summary>
+        /// Drops worlds that were disposed without <see cref="Uninstall"/>. A disposed
+        /// <see cref="World"/> is a managed object with <c>IsCreated == false</c>; holding it is
+        /// harmless but pointless, and pruning keeps <see cref="InstalledWorldCount"/> honest.
+        /// </summary>
+        private void PruneDisposedWorlds()
+        {
+            for (var i = _installedWorlds.Count - 1; i >= 0; i--)
+            {
+                if (_installedWorlds[i] == null || !_installedWorlds[i].IsCreated) _installedWorlds.RemoveAt(i);
+            }
         }
 
         /// <remarks>
@@ -177,6 +360,7 @@ namespace Cuvara.DOTS.Configuration
 
             using var builder = new BlobBuilder(Allocator.Temp);
             ref var root = ref builder.ConstructRoot<ViewConfigTable>();
+            root.Version = Version;
             var array = builder.Allocate(ref root.Records, _records.Length);
             for (var i = 0; i < _records.Length; i++) array[i] = _records[i];
 

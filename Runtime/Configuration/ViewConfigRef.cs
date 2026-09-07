@@ -18,9 +18,23 @@ namespace Cuvara.DOTS.Configuration
     /// It also keeps the bare-key path exactly as it was — an entity with only
     /// <c>EntityViewRequest.ViewKey</c> behaves identically to before this component existed.
     /// </para>
+    /// <para>
+    /// <b>Versioned since 0.28.0.</b> An index alone cannot tell "the goblin" from "whatever is
+    /// at slot 3 after the catalog was rebuilt", and the spawn path could not detect the swap — an
+    /// in-range wrong index reads as a valid record. <see cref="Version"/> is the catalog's
+    /// <see cref="ViewConfigCatalog.Version"/> at the moment the ref was issued; the spawn system
+    /// refuses a ref whose version differs from the installed table's and falls back to the
+    /// request's own key. Obtain refs from <see cref="ViewConfigCatalog.CreateRef(int)"/> — a
+    /// <c>new ViewConfigRef { Index = i }</c> carries version 0, which no built table ever has,
+    /// and is therefore always refused. That is deliberate: an unstamped ref is the silent-swap bug
+    /// waiting to happen.
+    /// </para>
     /// </remarks>
     public struct ViewConfigRef : IComponentData
     {
         public int Index;
+
+        /// <summary>Catalog version the index is valid for. 0 = unstamped, never accepted.</summary>
+        public int Version;
     }
 }

@@ -45,6 +45,15 @@ primitives, and the Console narrates what the chunk reference counts do while it
    step 3, when they pop in. That is `EntityViewSpawnSystem` retrying rather than hitching on a
    synchronous load.
 
+7. **HUD feeds — optional.** Add `HudOverlaysSample` to the same GameObject. It puts a
+   `ViewOverlayAnchor` on every entity with a view and a `MinimapMarker` on every requested entity,
+   installs the minimap module (`MinimapBootstrap.Install`), and draws IMGUI labels above the
+   primitives plus a minimap box in the corner. A `ViewOverlayReconciler<Label>` keeps one label per
+   *entity* — acquired on first sight, hidden while behind the camera or beyond 60 m, released the
+   frame the entity leaves the buffer — and the box's header counts acquires/releases so recycling
+   is visible. At step 3 half the labels and dots vanish with their entities; after step 6 both
+   buffers read zero. Contract: `Documentation~/MINIMAP-OVERLAY.md`.
+
 ## How to run it
 
 1. Import the sample (Package Manager → Cuvara DOTS → Samples → *Hybrid Views* → Import).

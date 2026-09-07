@@ -8,6 +8,13 @@ namespace Cuvara.DOTS.Netcode
         Spawn = 0,
         State = 1,
         Despawn = 2,
+
+        /// <summary>
+        /// A session boundary: every mirror of the previous generation is torn down before anything
+        /// stamped with this command's <see cref="NetworkViewCommand.Generation"/> is applied.
+        /// Enqueued by <see cref="DotsEntityView.BeginGeneration"/>, never by an <c>IEntityView</c> call.
+        /// </summary>
+        Reset = 3,
     }
 
     /// <summary>
@@ -31,6 +38,19 @@ namespace Cuvara.DOTS.Netcode
     {
         public NetworkViewCommandKind Kind;
 
+        /// <summary>
+        /// <see cref="DotsEntityView.Generation"/> at enqueue time. The drain drops any command older
+        /// than the view's current generation, so data from a session that was reset while it sat
+        /// in the queue cannot respawn that session's entities.
+        /// </summary>
+        public int Generation;
+
+        /// <summary>
+        /// <see cref="NetworkIngestionMetrics.Now"/> at enqueue time. Diagnostics only: the drain
+        /// reports how long the oldest command waited. Never used to place a sample.
+        /// </summary>
+        public double EnqueueTime;
+
         public FixedString64Bytes Id;
 
         /// <summary>Server entity kind, for <c>NetworkEntity.Type</c>. Spawn only.</summary>
@@ -41,8 +61,21 @@ namespace Cuvara.DOTS.Netcode
         /// <summary>Config table index resolved at enqueue time, or -1 when the entity has no config.</summary>
         public int ConfigIndex;
 
+        /// <summary>
+        /// <see cref="Cuvara.DOTS.Configuration.ViewConfigCatalog.Version"/> the index was resolved
+        /// against, carried onto the entity's <c>ViewConfigRef</c> so a rebuild between enqueue and
+        /// drain is refused rather than resolved to the wrong record.
+        /// </summary>
+        public int ConfigVersion;
+
         /// <summary>View key resolved at enqueue time. Empty when unconfigured.</summary>
         public FixedString64Bytes ViewKey;
+
+        /// <summary>
+        /// Minimap category resolved at enqueue time, or -1 when the entity is not on the map. Spawn
+        /// only. Negative rather than nullable so the struct stays blittable.
+        /// </summary>
+        public int MinimapCategory;
 
         public float X;
 

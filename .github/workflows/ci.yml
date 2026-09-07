@@ -58,6 +58,22 @@ name: CI
 # first tag where that directory actually exists as far as the Editor is
 # concerned. A version number that merely contains a feature is not enough.
 
+# THE MATRIX, in one place (Documentation~/SUPPORT-MATRIX.md §4 mirrors this table):
+#
+#   row                          optional packages installed                      must be PRESENT                      must be ABSENT
+#   no optional packages         —                                                 Runtime, Editor                      Netcode, Prediction, GameLogic, Physics, DI, GameFoundation
+#   netcode absent               shared-gamelogic                                  GameLogic                            Netcode, Prediction, Physics, DI, GameFoundation
+#   netcode present              netcode + shared-gamelogic (+OpenUPM scope)       Netcode, Prediction, GameLogic       Physics, GameFoundation   (DI: observed — VContainer arrives via netcode)
+#   physics present              com.unity.physics                                 Physics, Tests.Physics               Netcode, Prediction, GameLogic, DI, GameFoundation
+#   full stack                   netcode + sgl + VContainer + MessagePipe + UniTask DI, Tests.DI, Netcode, Prediction    Physics, GameFoundation
+#   gamefoundation present       UniT pooling/resources + UniTask + VContainer     GameFoundation                       Netcode, Prediction, GameLogic, Physics
+#
+# Every row runs `testMode: all` (EditMode + PlayMode), uploads its result XML as an
+# artifact, writes an inventory of which package assemblies Unity compiled
+# (.github/scripts/inventory_assemblies.py — absent is a stated fact, not a gap in the
+# log), and asserts test-count floors. Android IL2CPP and WebGL are NOT in this matrix;
+# SUPPORT-MATRIX.md §5 says what a row for them would need.
+
 on:
   push:
     branches: [main, develop]
@@ -154,7 +170,7 @@ jobs:
               "com.unity.burst": "1.8.30",
               "com.unity.collections": "2.6.8",
               "com.unity.mathematics": "1.3.2",
-              "com.rpgmmo.shared-gamelogic": "https://github.com/Cuvara/rpg-mmo-server.git?path=/backend/gameserver-dotnet/Shared.GameLogic#sgl-v0.2.2"
+              "com.rpgmmo.shared-gamelogic": "https://github.com/Cuvara/rpg-mmo-server.git?path=/backend/gameserver-dotnet/Shared.GameLogic#sgl-v0.3.0"
             },
             "testables": ["com.cuvara.dots"]
           }
@@ -200,6 +216,15 @@ jobs:
           checkName: Test Results (netcode absent)
           artifactsPath: artifacts
 
+      # Absent is a fact, not a gap: every package assembly is listed as present or absent,
+      # against this row's expectation, in the log, the step summary and the artifact.
+      - name: Inventory compiled assemblies
+        if: always()
+        run: |
+          mkdir -p artifacts && sudo chmod -R a+rwX artifacts
+          python3 package/.github/scripts/inventory_assemblies.py Library/ScriptAssemblies artifacts/assemblies.md \
+            Cuvara.DOTS.Runtime=present Cuvara.DOTS.GameLogic=present Cuvara.DOTS.Netcode=absent Cuvara.DOTS.Netcode.Prediction=absent Cuvara.DOTS.Physics=absent Cuvara.DOTS.DI=absent Cuvara.DOTS.GameFoundation=absent Cuvara.DOTS.Tests.Editor=present Cuvara.DOTS.Tests.Runtime=present Cuvara.DOTS.Tests.GameLogic=present Cuvara.DOTS.Tests.Netcode=absent Cuvara.DOTS.Tests.Prediction=absent Cuvara.DOTS.Tests.Physics=absent Cuvara.DOTS.Tests.DI=absent
+
       # The adapter must be gone, not broken. If this file exists, the
       # versionDefines gate is not doing its job and the package would ship a
       # CS0535 into any project on an older netcode.
@@ -225,11 +250,13 @@ jobs:
         if: always()
         run: |
           python3 package/.github/scripts/assert_test_floors.py artifacts \
-            'Cuvara.DOTS.Tests.Editor>=30' \
+            'Cuvara.DOTS.Tests.Editor>=100' \
             'Cuvara.DOTS.Tests.Runtime>=29' \
             'Cuvara.DOTS.Tests.GameLogic>=41' \
             'Cuvara.DOTS.Tests.Netcode==0' \
-            'Cuvara.DOTS.Tests.Prediction==0'
+            'Cuvara.DOTS.Tests.Prediction==0' \
+            'Cuvara.DOTS.Tests.Physics==0' \
+            'Cuvara.DOTS.Tests.DI==0'
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -290,12 +317,12 @@ jobs:
           {
             "dependencies": {
               "com.cuvara.dots": "file:../package",
-              "com.cuvara.netcode": "https://github.com/Cuvara/Netcode.git#v0.19.0",
+              "com.cuvara.netcode": "https://github.com/Cuvara/Netcode.git#v0.31.0",
               "com.unity.entities": "1.4.8",
               "com.unity.burst": "1.8.30",
               "com.unity.collections": "2.6.8",
               "com.unity.mathematics": "1.3.2",
-              "com.rpgmmo.shared-gamelogic": "https://github.com/Cuvara/rpg-mmo-server.git?path=/backend/gameserver-dotnet/Shared.GameLogic#sgl-v0.2.2"
+              "com.rpgmmo.shared-gamelogic": "https://github.com/Cuvara/rpg-mmo-server.git?path=/backend/gameserver-dotnet/Shared.GameLogic#sgl-v0.3.0"
             },
             "scopedRegistries": [
               {
@@ -348,6 +375,15 @@ jobs:
           checkName: Test Results (netcode present)
           artifactsPath: artifacts
 
+      # Absent is a fact, not a gap: every package assembly is listed as present or absent,
+      # against this row's expectation, in the log, the step summary and the artifact.
+      - name: Inventory compiled assemblies
+        if: always()
+        run: |
+          mkdir -p artifacts && sudo chmod -R a+rwX artifacts
+          python3 package/.github/scripts/inventory_assemblies.py Library/ScriptAssemblies artifacts/assemblies.md \
+            Cuvara.DOTS.Runtime=present Cuvara.DOTS.GameLogic=present Cuvara.DOTS.Netcode=present Cuvara.DOTS.Netcode.Prediction=present Cuvara.DOTS.Physics=absent Cuvara.DOTS.GameFoundation=absent Cuvara.DOTS.Tests.Editor=present Cuvara.DOTS.Tests.Runtime=present Cuvara.DOTS.Tests.GameLogic=present Cuvara.DOTS.Tests.Netcode=present Cuvara.DOTS.Tests.Prediction=present Cuvara.DOTS.Tests.Physics=absent
+
       - name: Samples must compile
         if: always()
         run: |
@@ -379,11 +415,12 @@ jobs:
         if: always()
         run: |
           python3 package/.github/scripts/assert_test_floors.py artifacts \
-            'Cuvara.DOTS.Tests.Editor>=30' \
+            'Cuvara.DOTS.Tests.Editor>=100' \
             'Cuvara.DOTS.Tests.Runtime>=29' \
             'Cuvara.DOTS.Tests.GameLogic>=41' \
             'Cuvara.DOTS.Tests.Netcode>=47' \
-            'Cuvara.DOTS.Tests.Prediction>=19'
+            'Cuvara.DOTS.Tests.Prediction>=19' \
+            'Cuvara.DOTS.Tests.Physics==0'
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -468,6 +505,15 @@ jobs:
           checkName: Test Results (no optional packages)
           artifactsPath: artifacts
 
+      # Absent is a fact, not a gap: every package assembly is listed as present or absent,
+      # against this row's expectation, in the log, the step summary and the artifact.
+      - name: Inventory compiled assemblies
+        if: always()
+        run: |
+          mkdir -p artifacts && sudo chmod -R a+rwX artifacts
+          python3 package/.github/scripts/inventory_assemblies.py Library/ScriptAssemblies artifacts/assemblies.md \
+            Cuvara.DOTS.Runtime=present Cuvara.DOTS.Editor=present Cuvara.DOTS.GameLogic=absent Cuvara.DOTS.Netcode=absent Cuvara.DOTS.Netcode.Prediction=absent Cuvara.DOTS.Physics=absent Cuvara.DOTS.DI=absent Cuvara.DOTS.GameFoundation=absent Cuvara.DOTS.Tests.Editor=present Cuvara.DOTS.Tests.Runtime=present Cuvara.DOTS.Tests.GameLogic=absent Cuvara.DOTS.Tests.Netcode=absent Cuvara.DOTS.Tests.Prediction=absent Cuvara.DOTS.Tests.Physics=absent Cuvara.DOTS.Tests.DI=absent
+
       - name: Samples must compile as their constraints allow
         if: always()
         run: |
@@ -481,7 +527,7 @@ jobs:
         if: always()
         run: |
           FAILED=0
-          for DLL in Cuvara.DOTS.Netcode Cuvara.DOTS.Netcode.Prediction Cuvara.DOTS.GameLogic; do
+          for DLL in Cuvara.DOTS.Netcode Cuvara.DOTS.Netcode.Prediction Cuvara.DOTS.GameLogic Cuvara.DOTS.Physics Cuvara.DOTS.DI Cuvara.DOTS.GameFoundation; do
             if [ -f "Library/ScriptAssemblies/$DLL.dll" ]; then
               echo "::error::$DLL.dll EXISTS with no optional package installed. Its defineConstraints are not gating it."
               FAILED=1
@@ -495,14 +541,344 @@ jobs:
         if: always()
         run: |
           python3 package/.github/scripts/assert_test_floors.py artifacts \
-            'Cuvara.DOTS.Tests.Editor>=30' \
+            'Cuvara.DOTS.Tests.Editor>=100' \
             'Cuvara.DOTS.Tests.Runtime>=29' \
             'Cuvara.DOTS.Tests.GameLogic==0' \
             'Cuvara.DOTS.Tests.Netcode==0' \
-            'Cuvara.DOTS.Tests.Prediction==0'
+            'Cuvara.DOTS.Tests.Prediction==0' \
+            'Cuvara.DOTS.Tests.Physics==0' \
+            'Cuvara.DOTS.Tests.DI==0'
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: results-core-only
+          path: artifacts/
+
+  # ---------------------------------------------------------------------------
+  # Configuration 4: com.unity.physics present, nothing else optional.
+  #
+  # Runtime.Physics shipped for three releases with no CI row installing the one
+  # package it is gated on, so "compiles in the client" was its entire evidence.
+  # Tests/Editor.Physics carries the same versionDefines gate as the assembly it
+  # tests, which is exactly why it needs a row where the gate is SATISFIED: in every
+  # other row it is compiled out, correctly, and the floor `==0` there proves the
+  # gate; the floor `>=35` here proves the tests exist and run. Pinned to the
+  # version the client project uses.
+  # ---------------------------------------------------------------------------
+  test-with-physics:
+    name: Unity Tests (physics present)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: package
+
+      - name: Bootstrap test project
+        run: |
+          mkdir -p Assets ProjectSettings Packages
+
+          cat > Packages/manifest.json << 'JSON'
+          {
+            "dependencies": {
+              "com.cuvara.dots": "file:../package",
+              "com.unity.entities": "1.4.8",
+              "com.unity.burst": "1.8.30",
+              "com.unity.collections": "2.6.8",
+              "com.unity.mathematics": "1.3.2",
+              "com.unity.physics": "1.4.7"
+            },
+            "testables": ["com.cuvara.dots"]
+          }
+          JSON
+
+          cat > ProjectSettings/ProjectSettings.asset << 'YAML'
+          %YAML 1.1
+          %TAG !u! tag:unity3d.com,2011:
+          --- !u!129 &1
+          PlayerSettings:
+            companyName: Cuvara
+            productName: DotsTest
+          YAML
+
+      - name: Import samples so they are compiled
+        run: |
+          for sample in package/Samples~/*/; do
+            name=$(basename "$sample")
+            if [ "$name" = "StressBenchmark" ]; then continue; fi
+            cp -r "$sample" "Assets/$name"
+          done
+
+      - name: Run tests
+        uses: game-ci/unity-test-runner@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          unityVersion: 6000.3.9f1
+          testMode: all
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          checkName: Test Results (physics present)
+          artifactsPath: artifacts
+
+      # Absent is a fact, not a gap: every package assembly is listed as present or absent,
+      # against this row's expectation, in the log, the step summary and the artifact.
+      - name: Inventory compiled assemblies
+        if: always()
+        run: |
+          mkdir -p artifacts && sudo chmod -R a+rwX artifacts
+          python3 package/.github/scripts/inventory_assemblies.py Library/ScriptAssemblies artifacts/assemblies.md \
+            Cuvara.DOTS.Runtime=present Cuvara.DOTS.Physics=present Cuvara.DOTS.Tests.Physics=present Cuvara.DOTS.Netcode=absent Cuvara.DOTS.Netcode.Prediction=absent Cuvara.DOTS.GameLogic=absent Cuvara.DOTS.DI=absent Cuvara.DOTS.GameFoundation=absent Cuvara.DOTS.Tests.Editor=present Cuvara.DOTS.Tests.Runtime=present Cuvara.DOTS.Tests.Netcode=absent Cuvara.DOTS.Tests.Prediction=absent Cuvara.DOTS.Tests.GameLogic=absent Cuvara.DOTS.Tests.DI=absent
+
+      - name: Samples must compile as their constraints allow
+        if: always()
+        run: |
+          test -f Library/ScriptAssemblies/Cuvara.DOTS.Samples.HybridViews.dll \
+            || { echo "::error::HybridViews sample did not compile; it needs no optional package and must always build"; exit 1; }
+          test ! -f Library/ScriptAssemblies/Cuvara.DOTS.Samples.NetworkedPrediction.dll \
+            || { echo "::error::NetworkedPrediction sample compiled without its optional packages; its defineConstraints are not gating it"; exit 1; }
+
+      - name: Assert test floors
+        if: always()
+        run: |
+          python3 package/.github/scripts/assert_test_floors.py artifacts \
+            'Cuvara.DOTS.Tests.Editor>=100' \
+            'Cuvara.DOTS.Tests.Runtime>=29' \
+            'Cuvara.DOTS.Tests.Physics>=35' \
+            'Cuvara.DOTS.Tests.GameLogic==0' \
+            'Cuvara.DOTS.Tests.Netcode==0' \
+            'Cuvara.DOTS.Tests.Prediction==0' \
+            'Cuvara.DOTS.Tests.DI==0'
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: results-with-physics
+          path: artifacts/
+
+  # ---------------------------------------------------------------------------
+  # Configuration 5: the client's full stack — netcode, shared-gamelogic, VContainer,
+  # MessagePipe (+ its VContainer bridge), UniTask.
+  #
+  # This is the only row in which Cuvara.DOTS.DI has every assembly it references,
+  # and therefore the only row whose floor on Cuvara.DOTS.Tests.DI can be `>=`. The
+  # "netcode present" row happens to resolve VContainer through netcode's own
+  # declaration and so may compile DI without MessagePipe; that is OBSERVED there
+  # by the inventory, never asserted, because a gate should not depend on a
+  # dependency's dependency. Pins mirror the client project's packages-lock.json;
+  # they are part of the configuration under test and move together.
+  # ---------------------------------------------------------------------------
+  test-full-stack:
+    name: Unity Tests (full stack — netcode, VContainer, MessagePipe)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: package
+
+      - name: Bootstrap test project
+        run: |
+          mkdir -p Assets ProjectSettings Packages
+
+          cat > Packages/manifest.json << 'JSON'
+          {
+            "dependencies": {
+              "com.cuvara.dots": "file:../package",
+              "com.cuvara.netcode": "https://github.com/Cuvara/Netcode.git#v0.31.0",
+              "com.unity.entities": "1.4.8",
+              "com.unity.burst": "1.8.30",
+              "com.unity.collections": "2.6.8",
+              "com.unity.mathematics": "1.3.2",
+              "com.rpgmmo.shared-gamelogic": "https://github.com/Cuvara/rpg-mmo-server.git?path=/backend/gameserver-dotnet/Shared.GameLogic#sgl-v0.3.0",
+              "jp.hadashikick.vcontainer": "1.16.9",
+              "com.cysharp.unitask": "2.5.10",
+              "com.cysharp.messagepipe": "1.8.1",
+              "com.cysharp.messagepipe.vcontainer": "1.8.1"
+            },
+            "scopedRegistries": [
+              {
+                "name": "OpenUPM",
+                "url": "https://package.openupm.com",
+                "scopes": ["com.cysharp", "jp.hadashikick", "org.nuget"]
+              }
+            ],
+            "testables": ["com.cuvara.dots"]
+          }
+          JSON
+
+          cat > ProjectSettings/ProjectSettings.asset << 'YAML'
+          %YAML 1.1
+          %TAG !u! tag:unity3d.com,2011:
+          --- !u!129 &1
+          PlayerSettings:
+            companyName: Cuvara
+            productName: DotsTest
+          YAML
+
+      - name: Import samples so they are compiled
+        run: |
+          for sample in package/Samples~/*/; do
+            name=$(basename "$sample")
+            if [ "$name" = "StressBenchmark" ]; then continue; fi
+            cp -r "$sample" "Assets/$name"
+          done
+
+      - name: Run tests
+        uses: game-ci/unity-test-runner@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          unityVersion: 6000.3.9f1
+          testMode: all
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          checkName: Test Results (full stack)
+          artifactsPath: artifacts
+
+      # Absent is a fact, not a gap: every package assembly is listed as present or absent,
+      # against this row's expectation, in the log, the step summary and the artifact.
+      - name: Inventory compiled assemblies
+        if: always()
+        run: |
+          mkdir -p artifacts && sudo chmod -R a+rwX artifacts
+          python3 package/.github/scripts/inventory_assemblies.py Library/ScriptAssemblies artifacts/assemblies.md \
+            Cuvara.DOTS.Runtime=present Cuvara.DOTS.Netcode=present Cuvara.DOTS.Netcode.Prediction=present Cuvara.DOTS.GameLogic=present Cuvara.DOTS.DI=present Cuvara.DOTS.Physics=absent Cuvara.DOTS.GameFoundation=absent Cuvara.DOTS.Tests.Editor=present Cuvara.DOTS.Tests.Runtime=present Cuvara.DOTS.Tests.GameLogic=present Cuvara.DOTS.Tests.Netcode=present Cuvara.DOTS.Tests.Prediction=present Cuvara.DOTS.Tests.DI=present Cuvara.DOTS.Tests.Physics=absent
+
+      - name: Samples must compile
+        if: always()
+        run: |
+          for DLL in Cuvara.DOTS.Samples.HybridViews Cuvara.DOTS.Samples.NetworkedPrediction; do
+            test -f "Library/ScriptAssemblies/$DLL.dll" \
+              || { echo "::error::$DLL.dll did not compile."; exit 1; }
+          done
+
+      - name: Assert test floors
+        if: always()
+        run: |
+          python3 package/.github/scripts/assert_test_floors.py artifacts \
+            'Cuvara.DOTS.Tests.Editor>=100' \
+            'Cuvara.DOTS.Tests.Runtime>=29' \
+            'Cuvara.DOTS.Tests.GameLogic>=41' \
+            'Cuvara.DOTS.Tests.Netcode>=47' \
+            'Cuvara.DOTS.Tests.Prediction>=19' \
+            'Cuvara.DOTS.Tests.DI>=5' \
+            'Cuvara.DOTS.Tests.Physics==0'
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: results-full-stack
+          path: artifacts/
+
+  # ---------------------------------------------------------------------------
+  # Configuration 6: UniT (GameFoundation) present — pooling, resource management,
+  # UniTask, VContainer — and no netcode.
+  #
+  # Cuvara.DOTS.GameFoundation had never been compiled anywhere but the client
+  # project. This row makes it a package fact: the assembly is gated on three
+  # defines that only UniT + UniTask satisfy, and it must appear here. It has no
+  # test assembly (its provider needs a live IAssetsManager, which is Addressables
+  # content, not a unit-test fixture), so "present" is the whole assertion and the
+  # matrix says so. Pins mirror the client project's packages-lock.json.
+  # ---------------------------------------------------------------------------
+  test-with-gamefoundation:
+    name: Unity Tests (GameFoundation present)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: package
+
+      - name: Bootstrap test project
+        run: |
+          mkdir -p Assets ProjectSettings Packages
+
+          cat > Packages/manifest.json << 'JSON'
+          {
+            "dependencies": {
+              "com.cuvara.dots": "file:../package",
+              "com.unity.entities": "1.4.8",
+              "com.unity.burst": "1.8.30",
+              "com.unity.collections": "2.6.8",
+              "com.unity.mathematics": "1.3.2",
+              "com.frostbun.unit.pooling": "1.1.2",
+              "com.frostbun.unit.resourcemanagement": "1.1.1",
+              "com.cysharp.unitask": "2.5.10",
+              "jp.hadashikick.vcontainer": "1.16.9"
+            },
+            "scopedRegistries": [
+              {
+                "name": "OpenUPM",
+                "url": "https://package.openupm.com",
+                "scopes": ["com.cysharp", "jp.hadashikick", "com.frostbun", "org.nuget"]
+              }
+            ],
+            "testables": ["com.cuvara.dots"]
+          }
+          JSON
+
+          cat > ProjectSettings/ProjectSettings.asset << 'YAML'
+          %YAML 1.1
+          %TAG !u! tag:unity3d.com,2011:
+          --- !u!129 &1
+          PlayerSettings:
+            companyName: Cuvara
+            productName: DotsTest
+          YAML
+
+      - name: Import samples so they are compiled
+        run: |
+          for sample in package/Samples~/*/; do
+            name=$(basename "$sample")
+            if [ "$name" = "StressBenchmark" ]; then continue; fi
+            cp -r "$sample" "Assets/$name"
+          done
+
+      - name: Run tests
+        uses: game-ci/unity-test-runner@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          unityVersion: 6000.3.9f1
+          testMode: all
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          checkName: Test Results (GameFoundation present)
+          artifactsPath: artifacts
+
+      # Absent is a fact, not a gap: every package assembly is listed as present or absent,
+      # against this row's expectation, in the log, the step summary and the artifact.
+      - name: Inventory compiled assemblies
+        if: always()
+        run: |
+          mkdir -p artifacts && sudo chmod -R a+rwX artifacts
+          python3 package/.github/scripts/inventory_assemblies.py Library/ScriptAssemblies artifacts/assemblies.md \
+            Cuvara.DOTS.Runtime=present Cuvara.DOTS.GameFoundation=present Cuvara.DOTS.Netcode=absent Cuvara.DOTS.Netcode.Prediction=absent Cuvara.DOTS.GameLogic=absent Cuvara.DOTS.Physics=absent Cuvara.DOTS.Tests.Editor=present Cuvara.DOTS.Tests.Runtime=present Cuvara.DOTS.Tests.Netcode=absent Cuvara.DOTS.Tests.Prediction=absent Cuvara.DOTS.Tests.GameLogic=absent Cuvara.DOTS.Tests.Physics=absent
+
+      - name: Samples must compile as their constraints allow
+        if: always()
+        run: |
+          test -f Library/ScriptAssemblies/Cuvara.DOTS.Samples.HybridViews.dll \
+            || { echo "::error::HybridViews sample did not compile; it needs no optional package and must always build"; exit 1; }
+          test ! -f Library/ScriptAssemblies/Cuvara.DOTS.Samples.NetworkedPrediction.dll \
+            || { echo "::error::NetworkedPrediction sample compiled without its optional packages; its defineConstraints are not gating it"; exit 1; }
+
+      - name: Assert test floors
+        if: always()
+        run: |
+          python3 package/.github/scripts/assert_test_floors.py artifacts \
+            'Cuvara.DOTS.Tests.Editor>=100' \
+            'Cuvara.DOTS.Tests.Runtime>=29' \
+            'Cuvara.DOTS.Tests.GameLogic==0' \
+            'Cuvara.DOTS.Tests.Netcode==0' \
+            'Cuvara.DOTS.Tests.Prediction==0' \
+            'Cuvara.DOTS.Tests.Physics==0'
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: results-with-gamefoundation
           path: artifacts/
