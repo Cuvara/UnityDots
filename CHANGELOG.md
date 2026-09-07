@@ -256,6 +256,34 @@ despawn per life of a replicated id**. Contract: `Documentation~/NETWORK-LIFECYC
   when the catalog version changes.
 - `Documentation~/MODULE-LIFECYCLE.md`, `Documentation~/CONFIG-VALIDATION.md` (incl. the prefab
   replacement contract for providers).
+- **Physics integration (D07, `Runtime.Physics`).** `PhysicsEventCollectorSystem` reads
+  Unity.Physics' collision and trigger streams (`ICollisionEventsJob`/`ITriggerEventsJob`,
+  `CollisionEvent.CalculateDetails`) after `PhysicsSimulationGroup` and resolves them through
+  `PhysicsContactTracker` into enter/stay/exit per entity pair: identity is the full `Entity`
+  (index **and** version — a recycled index is a new pair), pairs are canonically ordered
+  (`PhysicsPairKey`, normal from A toward B), several Unity events for one pair fold into one
+  (`ContactCount`, summed impulse, mean normal/position), exits are flagged
+  `AnyEntityDestroyed` when an entity is gone, output order is exits → enters → stays sorted by
+  pair. Results land in the `PhysicsEventBuffer` singleton and optional `IDotsPublisher`s;
+  `PhysicsEventsBootstrap` installs/uninstalls through `DotsModules`.
+- **`ColliderLibrary`** — explicit ownership of collider blobs: one blob per (shape, size,
+  filter, material), counted leases, `Release` frees at zero, `Dispose` frees all.
+  `PhysicsBodyFactory` gains library overloads (shared, library-owned) and explicit-blob overloads
+  (caller-owned); the overloads that silently allocated an unowned blob per body are gone.
+- **`PhysicsBodyValidation`** — shape dimensions (incl. capsule height ≥ 2·radius), finite
+  positive mass, non-empty collision filter, `AssertSingleIntegrator`. `PhysicsBodyFactory`
+  validates through it and adds `PhysicsWorldIndex` (previously missing — bodies were invisible
+  to `BuildPhysicsWorld`) and `TriggerMaterial()`/`CollisionEventMaterial()` helpers.
+- **One-integrator rule.** New core tag `PhysicsDrivenMovement`: `MoveBounceSystem` and
+  `MoveTowardSystem` exclude it, `PhysicsMovementBridge` requires it, `PhysicsBodyFactory` adds
+  it to dynamic and kinematic bodies. An entity is moved by the direct movers or by Unity.Physics,
+  never both. `Documentation~/PHYSICS.md` (semantics, fixed-step timing, prediction interaction,
+  client-only scope).
+- Tests (`Tests/Editor.Physics`): `PhysicsContactTrackerTests` (11), `ColliderLibraryTests` (6),
+  `PhysicsBodyFactoryTests` (10, incl. the one-integrator test through `SimulationSystemGroup`),
+  `PhysicsEventsBootstrapTests` (8, incl. Unity.Physics stepped in a test world: trigger
+  enter/stay/exit, destroyed entity + reused index, aggregated collision with A→B normal,
+  install/step/uninstall cycles returning collider leases to zero).
 - **Camera behaviour and lifecycle (D09).** `CameraFollowMath` — the follow step as a pure
   function: a `float3` port of `Vector3.SmoothDamp` (held to 1e-4 against Unity's in tests) plus
   a hard `MaxSpeed * dt` per-frame clamp so `MaxSpeed` means what it says; `dt <= 0` holds
@@ -294,6 +322,12 @@ despawn per life of a replicated id**. Contract: `Documentation~/NETWORK-LIFECYC
 - `ViewOverlaySystem.OnDestroy` completes its dependency before disposing the overlay list and
   nulls the list on the buffer so disposal is observable.
 - `ArchetypeFactory.Create`/`CreateBatch` throw on a null preset or uncreated containers.
+- **Breaking (physics, pre-release):** `EntityCollision`/`EntityTriggerEvent` now carry `Entity`
+  (`EntityA`/`EntityB`), `Phase`, and for collisions `ContactCount`; the int-only constructors are
+  gone (`EntityIndexA/B` remain as properties, `EntityTriggerEvent.Entered` as a view of `Phase`).
+  `PhysicsBodyFactory.Add*Body(em, entity, shape, size[, mass])` replaced by library / explicit-blob
+  overloads; `CreateCollider` gains a `Material` parameter and validates. `PhysicsMovementBridge`
+  only drives entities tagged `PhysicsDrivenMovement`.
 - README: view-configuration snippet uses `catalog.CreateRef`; system-group tree lists
   `ViewOverlaySystem` and `CameraFollowSystem`; new "Modules" section.
 

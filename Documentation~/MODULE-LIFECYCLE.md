@@ -11,6 +11,7 @@ installed it into a specific `World`.
 | Simulation | `DotsSimulationBootstrap.InstallSimulationSystems(world[, scope])` | Root | move-toward, bounce, spin, health-death, time-to-live under the gameplay groups | destroys the five systems; groups stay |
 | Camera follow | `CameraFollowBootstrap.Install(world, config[, scope])` | Session | `CameraFollowConfig` singleton + `CameraFollowSystem` after `ViewTransformSyncGroup` | destroys the singleton and the system |
 | Physics movement (`Runtime.Physics`) | `PhysicsMovementBootstrap.Install(world[, scope, requirePhysicsPipeline])` | Session | `PhysicsMovementBridge` in `MovementSystemGroup` | destroys the bridge; groups stay |
+| Physics events (`Runtime.Physics`) | `PhysicsEventsBootstrap.Install(world[, scope, publishers, requirePhysicsPipeline])` | Session | `PhysicsEventBuffer` singleton + `PhysicsEventCollectorSystem` after `PhysicsSimulationGroup` | destroys singleton and collector (its `OnDestroy` completes jobs, frees its lists) |
 | View config catalog | `catalog.Build(...)` then `catalog.Install(world)` | Session | `ViewConfigTableReference` singleton | `catalog.Uninstall(world)` removes the singleton; `catalog.Dispose()` also frees the blob |
 | Netcode adapter / prediction | `DotsNetcodeBootstrap` / `DotsPredictionBootstrap` | Session | see `NETCODE-INTEGRATION.md` | unchanged in this release; not yet recorded in `DotsModules` |
 
