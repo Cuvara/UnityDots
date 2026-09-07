@@ -86,6 +86,14 @@ netcode adapter, then the session's mirrored entities, then `catalog.Dispose()` 
 last because the systems that read its blob must be gone first. `DotsModules.UninstallAll`
 before `world.Dispose()` covers the recorded modules; the catalog is disposed by whoever built it.
 
+## DI (VContainer) ownership
+
+`builder.RegisterDotsViews(viewRoot, world)` installs the view module at container build and
+registers a `DotsViewsLifetime` singleton; **disposing that container uninstalls the module**
+(`DotsViewBootstrap.Uninstall`: views recycled, requests handed back, record removed). Whichever
+of the container and the world is disposed first, the other side is a safe no-op.
+`Cuvara.DOTS.Tests.DI` proves resolution, root-scope ownership and the disposal path.
+
 ## Where the client wires this
 
 Root scope (`RegisterDots` → `RegisterDotsViews`): registry, pools, provisioner,

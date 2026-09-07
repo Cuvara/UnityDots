@@ -1,0 +1,43 @@
+{
+    "name": "Cuvara.DOTS.Tests.DI",
+    "rootNamespace": "Cuvara.DOTS.Tests.DI",
+    "references": [
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "Cuvara.DOTS.Runtime",
+        "Cuvara.DOTS.DI",
+        "VContainer",
+        "Unity.Entities",
+        "Unity.Burst",
+        "Unity.Collections",
+        "Unity.Mathematics",
+        "Unity.Transforms"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS",
+        "CUVARA_DOTS_VCONTAINER"
+    ],
+    "versionDefines": [
+        {
+            "name": "jp.hadashikick.vcontainer",
+            "expression": "",
+            "define": "CUVARA_DOTS_VCONTAINER"
+        },
+        {
+            "name": "com.cysharp.messagepipe",
+            "expression": "",
+            "define": "CUVARA_DOTS_MESSAGEPIPE"
+        }
+    ],
+    "noEngineReferences": false
+}

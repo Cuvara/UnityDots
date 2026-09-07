@@ -50,9 +50,9 @@ Two things this file separates on purpose:
 | View overlay feed (`ViewOverlayAnchor`, `ViewOverlayBuffer`, `ViewOverlaySystem`, `ViewOverlayProjection`, `ViewOverlayReconciler<T>`, `IViewOverlayPresenter<T>`) | **implemented on this branch** — producer no longer goes stale on empty set, entries carry `Entity`, consumer contract (world→screen owner, behind-camera, distance, cadence, recycling) specified and helper-implemented; host owns camera + UI | `Runtime/Views` | `ViewOverlayConsumerTests` (13), `ViewOverlayAnchorTests` (5) | not used; sample consumer `HudOverlaysSample` |
 | Minimap module (`MinimapMarker`, `MinimapEntry`, `MinimapBuffer`, `MinimapPlane`, `MinimapDataSystem`, `MinimapBootstrap`) + netcode marking (`IMinimapCategoryResolver`, `TypeMinimapCategoryResolver`) | **implemented on this branch** — was data-contract-only in 0.27.1; covers only marked entities (mirrors on the netcode path ⇒ only what the server replicated); buffer never stale; native list owned by the module | `Runtime/Views/Minimap*.cs`, `Runtime.Netcode/*MinimapCategoryResolver.cs` | `MinimapModuleTests` (19), `NetworkMinimapTests` (4) | not used; sample consumer `HudOverlaysSample` |
 | Camera follow (`CameraFollowSystem`, `CameraFollowConfig`, `CameraFollowTarget`) | implemented system, **no installer** (`[DisableAutoCreation]`, not created by any bootstrap); `Camera.main` only; **in progress on `feat/bootstrap-config` (D04/D09)** | `Runtime/Views/CameraFollow*.cs` | none | not used |
-| Physics helpers (`PhysicsBodyFactory`, `SpatialQuery`) | implemented, **untested, not in CI** (no CI row installs `com.unity.physics`) | `Runtime.Physics` | none | compiles in client (physics 1.4.7 present); no call site |
-| `PhysicsMovementBridge` | implemented system, **no installer**; **in progress on `feat/bootstrap-config` (D04)** | `Runtime.Physics` | none | not used |
-| Collision/trigger events (`EntityCollision`, `EntityTriggerEvent`) | **data-contract-only** — the `CollisionEventSystem` the 0.26.0 changelog lists **does not exist in the source**; identity is `Entity.Index` only (no version) | `Runtime.Physics` | none | not used |
+| Physics helpers (`PhysicsBodyFactory`, `ColliderLibrary`, `PhysicsBodyValidation`, `SpatialQuery`) | implemented, tested in the **physics present** CI row | `Runtime.Physics` | `PhysicsBodyFactoryTests` (10), `ColliderLibraryTests` (6) | compiles in client (physics 1.4.7 present); no call site |
+| `PhysicsMovementBridge` + `PhysicsMovementBootstrap` | implemented, installer, one-integrator rule (`PhysicsDrivenMovement`) | `Runtime.Physics` | `PhysicsMovementBootstrapTests` (6), `PhysicsBodyFactoryTests` | not used |
+| Collision/trigger events (`EntityCollision`, `EntityTriggerEvent`, `PhysicsContactTracker`, `PhysicsEventCollectorSystem`, `PhysicsEventsBootstrap`) | implemented — enter/stay/exit per pair, identity `Entity` index **and** version | `Runtime.Physics` | `PhysicsContactTrackerTests` (11), `PhysicsEventsBootstrapTests` (8, real pipeline) | not used |
 | Editor debug window (`EntityViewDebugWindow`) | implemented, untested | `Editor` | none | available |
 | Hybrid Views sample (scene, `OrbitMotionSystem`, sample `PrimitiveViewAssetProvider`) | sample-only; **compiled in every CI row**, not run | `Samples~/HybridViews` | compile gate only | — |
 | Networked Prediction sample (+ lifecycle log) | sample-only; compiled in the netcode CI row, runs only against a live backend | `Samples~/NetworkedPrediction` | compile gate only | — |
@@ -137,35 +137,77 @@ Untested; the chunk-provisioner panel is a placeholder that tells you to expose 
 
 ## 4. Tested configurations
 
-Source of truth: `.github/workflows/ci.yml` and `.github/scripts/assert_test_floors.py`. Every row
-runs Unity **6000.3.9f1** on `ubuntu-latest` via `game-ci/unity-test-runner`, `testMode: all`
-(EditMode + PlayMode), Mono scripting backend, and asserts a **test-count floor per assembly** —
-a green run over zero tests fails.
+Source of truth: `.github/workflows/ci.yml`, `.github/scripts/assert_test_floors.py`,
+`.github/scripts/inventory_assemblies.py`. Every row runs Unity **6000.3.9f1** on `ubuntu-latest`
+via `game-ci/unity-test-runner`, `testMode: all` (EditMode + PlayMode), Mono scripting backend,
+and:
 
-| CI row | Manifest | Adapter assemblies | Floors asserted |
-|---|---|---|---|
-| **no optional packages** | four Unity pins only | `Cuvara.DOTS.Netcode`, `.Netcode.Prediction`, `.GameLogic` must be **absent** | Editor ≥ 30, Runtime ≥ 29, GameLogic == 0, Netcode == 0, Prediction == 0 |
-| **netcode absent** | + `com.rpgmmo.shared-gamelogic` `sgl-v0.3.0` | `Cuvara.DOTS.Netcode` must be absent | Editor ≥ 30, Runtime ≥ 29, GameLogic ≥ 41, Netcode == 0, Prediction == 0 |
-| **netcode present** | + `com.cuvara.netcode` **`v0.31.0`** + `sgl-v0.3.0` + OpenUPM scope (UniTask, VContainer, NuGet for netcode's own needs) | `Cuvara.DOTS.Netcode` must be present | Editor ≥ 30, Runtime ≥ 29, GameLogic ≥ 41, Netcode ≥ 47, Prediction ≥ 19 |
+- asserts a **test-count floor per test assembly** — a green run over zero tests fails; `==0`
+  floors prove an assembly was compiled out by its `defineConstraints`;
+- writes an **inventory of every package assembly** (present/absent vs. the row's expectation) to
+  the log, the job's step summary and `artifacts/assemblies.md` — an absent assembly is a stated
+  fact in every row, never a gap in the log;
+- uploads the NUnit result XML and the inventory as the artifact named in the table.
 
-Samples: `HybridViews` must compile in every row; `NetworkedPrediction` must compile in the
-netcode row and must be **absent** in the other two (its `defineConstraints` are under test);
+| CI row (`checkName`) | Optional packages in the manifest | Must be present | Must be absent | Floors | Artifact |
+|---|---|---|---|---|---|
+| **no optional packages** | — (four Unity pins) | `Runtime`, `Editor` | `Netcode`, `.Prediction`, `GameLogic`, `Physics`, `DI`, `GameFoundation` | Editor ≥ 100, Runtime ≥ 29; GameLogic, Netcode, Prediction, Physics, DI == 0 | `results-core-only` |
+| **netcode absent** | `com.rpgmmo.shared-gamelogic` `sgl-v0.3.0` | `GameLogic` | `Netcode`, `.Prediction`, `Physics`, `DI`, `GameFoundation` | + GameLogic ≥ 41; Netcode, Prediction, Physics, DI == 0 | `results-without-netcode` |
+| **netcode present** | `com.cuvara.netcode` **`v0.31.0`**, `sgl-v0.3.0`, OpenUPM scope (netcode's own UniTask/VContainer/NuGet) | `Netcode`, `.Prediction`, `GameLogic` | `Physics`, `GameFoundation` | + Netcode ≥ 47, Prediction ≥ 19; Physics == 0. `DI` **observed only** (VContainer arrives through netcode; MessagePipe does not) | `results-with-netcode` |
+| **physics present** | `com.unity.physics` **1.4.7** | `Physics`, `Tests.Physics` | `Netcode`, `.Prediction`, `GameLogic`, `DI`, `GameFoundation` | Editor ≥ 100, Runtime ≥ 29, **Physics ≥ 35**; others == 0 | `results-with-physics` |
+| **full stack** | netcode `v0.31.0`, `sgl-v0.3.0`, VContainer 1.16.9, MessagePipe 1.8.1 (+ `.vcontainer`), UniTask 2.5.10 | `DI`, `Tests.DI`, `Netcode`, `.Prediction`, `GameLogic` | `Physics`, `GameFoundation` | Editor ≥ 100, Runtime ≥ 29, GameLogic ≥ 41, Netcode ≥ 47, Prediction ≥ 19, **DI ≥ 5**; Physics == 0 | `results-full-stack` |
+| **GameFoundation present** | `com.frostbun.unit.pooling` 1.1.2, `.resourcemanagement` 1.1.1, UniTask 2.5.10, VContainer 1.16.9 (OpenUPM `com.frostbun`) | `GameFoundation` | `Netcode`, `.Prediction`, `GameLogic`, `Physics` | Editor ≥ 100, Runtime ≥ 29; GameLogic, Netcode, Prediction, Physics == 0. **No test assembly** — presence is the whole assertion | `results-with-gamefoundation` |
+
+Pins mirror the client project's `packages-lock.json` and are part of the configuration under
+test; bump them together with the client (see `RELEASE.md › Compatibility evidence`).
+
+### Test assemblies — mode, gate, what they prove
+
+| Assembly | Mode | Gate (`defineConstraints`) | Runs in rows | Covers |
+|---|---|---|---|---|
+| `Cuvara.DOTS.Tests.Editor` | EditMode | none | all six | modules/lifecycle, verifier, config validation + catalog versioning, camera, archetypes, provisioning, registry sweep, layout |
+| `Cuvara.DOTS.Tests.Runtime` | **PlayMode** | none | all six | view lifecycle and cascade through real systems, simulation systems, config spawn, scheduling benchmark |
+| `Cuvara.DOTS.Tests.GameLogic` | EditMode | `CUVARA_SHARED_GAMELOGIC` | netcode absent, netcode present, full stack | `ISimulationModel` parity and golden vectors against `Shared.GameLogic` |
+| `Cuvara.DOTS.Tests.Netcode` | EditMode | `CUVARA_NETCODE` | netcode present, full stack | adapter, drain, interpolation, lifecycle events |
+| `Cuvara.DOTS.Tests.Prediction` | EditMode | `CUVARA_NETCODE` + `CUVARA_SHARED_GAMELOGIC` | netcode present, full stack | prediction driver and group layout |
+| `Cuvara.DOTS.Tests.Physics` | EditMode (Unity.Physics stepped manually in a test `World`) | `CUVARA_DOTS_PHYSICS` | physics present | contact tracker, collider library, body factory, one-integrator rule, events through the real pipeline |
+| `Cuvara.DOTS.Tests.DI` | EditMode | `CUVARA_DOTS_VCONTAINER` | full stack (+ observed wherever VContainer resolves) | `RegisterDotsViews` resolution, root-scope ownership, scope disposal uninstalls views, messaging fallbacks |
+
+Samples: `HybridViews` must compile in every row; `NetworkedPrediction` must compile in the two
+netcode rows and must be **absent** in the other four (its `defineConstraints` are under test);
 `StressBenchmark` is not imported by CI at all.
 
-**Not tested anywhere in CI:** `Cuvara.DOTS.DI` (no VContainer row), `Cuvara.DOTS.GameFoundation`
-(no UniT row), `Cuvara.DOTS.Physics` (no `com.unity.physics` row), `Cuvara.DOTS.Editor`,
-`MessagePipe` forwarding. These compile in the client project, which has VContainer, MessagePipe,
-UniT and `com.unity.physics` 1.4.7 installed — that is compile evidence, not runtime acceptance.
+**Still not tested anywhere in CI:** `Cuvara.DOTS.GameFoundation` at runtime (compiled only — its
+provider needs a live `IAssetsManager`), `Cuvara.DOTS.Editor` (compiled only), MessagePipe
+*forwarding* (the full-stack row compiles the adapters and resolves them; no test publishes through
+a real broker).
 
 ## 5. Platforms
 
 | Platform | Evidence | Status |
 |---|---|---|
-| Editor (Linux, Mono) | CI rows above | tests pass at the floors listed |
+| Editor (Linux, Mono) | the six CI rows above | tests pass at the floors listed |
 | Editor (Windows, Mono) | the client project's Editor | runs; no recorded test artefact |
 | Standalone Windows / Linux (Mono2x, no stripping) | client CI builds | compiles; exercises neither IL2CPP nor the stripper — see `ROADMAP.md › Measurement caveat` |
-| Android (IL2CPP) | none | **not verified**; required before any AOT/Burst/performance claim |
+| Android (IL2CPP) | none | **not verified** |
 | WebGL | none | **not verified**; blocked upstream on netcode's browser transport regardless |
+
+**What an Android IL2CPP row would need** (not written, because nothing here can run it yet):
+a `game-ci/unity-builder` job with `targetPlatform: Android`, `androidExportType: androidPackage`,
+scripting backend IL2CPP and managed stripping at the level the client ships, building a player
+that includes the package's PlayMode tests (`-runTests -testPlatform Android` needs a connected
+device or emulator on the runner — GitHub-hosted runners have none, so this is a self-hosted or
+device-farm job); the result XML from the device uploaded as an artifact and put through
+`assert_test_floors.py` with a `Cuvara.DOTS.Tests.Runtime >= 29` floor; plus a Burst AOT compile
+of the package's jobs (a Burst failure on Android is a build error, which the row would surface,
+and a link.xml if the stripper removes a reflected type). Until such a row exists, no AOT, Burst
+or performance statement about Android may cite this package's CI.
+
+**What a WebGL row would need:** the same builder job with `targetPlatform: WebGL`; PlayMode tests
+in a browser need a headless browser harness the Unity test runner does not ship, so the honest
+minimum is a **build-only** row proving the package compiles and links under IL2CPP/Emscripten
+with no threads (Burst jobs run single-threaded there). Blocked on the netcode transport in any
+case.
 
 ## 6. Performance claims
 

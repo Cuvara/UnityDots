@@ -66,6 +66,12 @@ namespace Cuvara.DOTS.DI
                     container.Resolve<IDotsPublisher<ChunkCascadeReleased>>()),
                 Lifetime.Singleton).AsSelf();
 
+            // The container owns the module's lifetime: disposing the scope uninstalls the views
+            // (recycling every live GameObject, handing requests back) exactly as
+            // DotsViewBootstrap.Uninstall documents. VContainer disposes IDisposable singletons it
+            // created, so this is the one place teardown can be guaranteed to run for a DI consumer.
+            builder.Register<DotsViewsLifetime>(Lifetime.Singleton).AsSelf();
+
             // Deferred to build time: the DOTS world and the container are created independently,
             // and resolving the registry during registration would invert that.
             builder.RegisterBuildCallback(container =>
@@ -78,9 +84,36 @@ namespace Cuvara.DOTS.DI
                 }
 
                 DotsViewBootstrap.Install(target, container.Resolve<EntityViewRegistry>());
+                container.Resolve<DotsViewsLifetime>().Attach(target);
             });
 
             return builder;
+        }
+    }
+
+    /// <summary>
+    /// Ties the view module's teardown to the container that installed it. Created by
+    /// <see cref="DotsViewsVContainer.RegisterDotsViews"/>; disposed by VContainer with the scope.
+    /// </summary>
+    /// <remarks>
+    /// Holds the world only from <see cref="Attach"/> to <see cref="Dispose"/>, and
+    /// <c>DotsViewBootstrap.Uninstall</c> is a no-op on a world that was disposed first — so
+    /// whichever of the container and the world goes first, nothing dangles and nothing throws.
+    /// </remarks>
+    public sealed class DotsViewsLifetime : System.IDisposable
+    {
+        private World _world;
+
+        /// <summary>The world this scope installed views into, or null before build / after dispose.</summary>
+        public World World => _world;
+
+        internal void Attach(World world) => _world = world;
+
+        public void Dispose()
+        {
+            var world = _world;
+            _world = null;
+            if (world != null) DotsViewBootstrap.Uninstall(world);
         }
     }
 }
