@@ -29,7 +29,7 @@ namespace Cuvara.DOTS.DI
     public static class MessagePipeVContainer
     {
         /// <summary>
-        /// Registers the five package message types. Call after MessagePipe's own
+        /// Registers the five view/chunk message types. The netcode adapter's two lifecycle events are registered by <see cref="NetworkLifecycleVContainer.RegisterDotsNetworkLifecycle"/> instead, because they exist only when <c>com.cuvara.netcode</c> does. Call after MessagePipe's own
         /// <c>RegisterMessagePipe()</c> and its <c>RegisterMessageBroker&lt;T&gt;</c> calls for these
         /// types; without them the resolve of <c>IPublisher&lt;T&gt;</c> fails at build time rather
         /// than silently doing nothing.
@@ -44,7 +44,7 @@ namespace Cuvara.DOTS.DI
             return builder;
         }
 
-        private static void RegisterMessage<TMessage>(IContainerBuilder builder)
+        internal static void RegisterMessage<TMessage>(IContainerBuilder builder)
         {
 #if CUVARA_DOTS_MESSAGEPIPE
             builder.Register<IDotsPublisher<TMessage>>(

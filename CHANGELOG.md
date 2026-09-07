@@ -78,6 +78,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ManualViewAssetProvider` fake whose loads stay pending until the test settles them.
 - `Documentation~/VIEW-PROVISIONING.md`: ownership/disposal/cancellation contracts, pool cap
   versus admission budget, chunk state machine and failure semantics.
+### Network lifecycle events are now published (D06)
+
+`NetworkEntitySpawned` and `NetworkEntityDespawned` were added in 0.27.0 as two structs and nothing
+in the package ever published them. They are now produced by the netcode adapter's drain system —
+the one place that holds the id → entity map and can therefore promise **exactly one spawn and one
+despawn per life of a replicated id**. Contract: `Documentation~/NETWORK-LIFECYCLE.md`.
+
+- **Network presence is not visual presence.** These events say a mirror entity exists / stopped
+  existing. `ViewSpawned`/`ViewDespawned` remain the visual lifecycle and are unchanged. An
+  area-of-interest exit is not a death — the wire does not distinguish exit from removal, and the new
+  `NetworkDespawnReason` (`Despawned`, `ExternalDestruction`, `Teardown`) reports only what the
+  adapter knows.
+- **Payload.** Both structs gain `Entity` (index **and** version) so a despawn can be matched to its
+  spawn after the entity is gone; `NetworkEntityDespawned` gains `IsLocal` and `Reason`. The 0.27.x
+  constructors still compile and carry `Entity.Null`.
+- **`NetworkEntityLifecycle`** (`Runtime.Netcode`), reached through `DotsEntityView.Lifecycle` or
+  passed to the view's new optional `lifecycle` constructor parameter. Synchronous delivery on the
+  drain's thread in command order; handlers in subscription order; a throwing handler is logged with
+  `Debug.LogException` and isolates nothing else; late subscription is not retroactive; subscribing
+  or disposing during dispatch takes effect from the next event; publishing is skipped entirely
+  while `HasObservers` is false, so an unobserved session allocates nothing. This is deliberately
+  narrower than a bus — two event types, one owner, no queue — and the 0.5.0 rule that the core
+  names no MessagePipe type still holds.
+- **Timing.** `Spawned` fires after every adapter-owned component is on the entity.
+  `Despawned(Despawned|Teardown)` fires **before** `DestroyEntity`, so a handler can read the last
+  transform for an effect. `Despawned(ExternalDestruction)` fires on the next command for an id whose
+  mirror something else destroyed; the entity no longer exists then, and the eventual wire despawn is
+  silent — one report per life.
+- **`DotsNetcodeBootstrap.Uninstall(world, destroyMirrors = false)`.** The default is 0.27.1's
+  behaviour byte for byte. `destroyMirrors: true` publishes one `Despawned(Teardown)` per id the
+  drain still holds, destroys the mirror entities and empties the map; a `Despawn` still queued in the
+  view is never applied afterwards, so there is no duplicate.
+- **The drain now recovers from an externally destroyed mirror on the next `Spawn` for that id**,
+  closing the first life with `ExternalDestruction` before opening the second. Before, such a spawn
+  was dropped and the id stayed invisible until it left and re-entered the area of interest.
+- **DI wiring**, optional: `RegisterDotsNetworkLifecycle()` in `Cuvara.DOTS.DI` (gated on
+  `CUVARA_NETCODE` as well as VContainer). With MessagePipe it registers publisher/subscriber
+  adapters for both events and a hub that forwards into them; without, the hub itself is the
+  `IDotsSubscriber<>`. `Cuvara.DOTS.DI` now references `Cuvara.DOTS.Netcode`, ignored when that
+  assembly is compiled out — the same arrangement it already has with `Cuvara.DOTS.GameLogic`.
+- **Consumer sample.** `Samples~/NetworkedPrediction/NetworkLifecycleLog.cs` subscribes both events,
+  counts presence, prints the last six with their reason in the overlay and Console, and the sample's
+  `OnDestroy` tears down with `destroyMirrors: true`.
+- **Tests.** `Tests/Editor.Netcode/NetworkLifecycleEventTests.cs` (15) drives the public groups with
+  the scripted sequences the contract lists — keyframe, delta, repeated keyframe, AOI exit/re-entry,
+  session reset, reconnect, external destruction, teardown with and without a queued despawn, throwing
+  subscriber, late subscriber, disposal, no-observer path. `NetworkEntityLifecycleTests.cs` (9)
+  covers the hub alone: dispatch order, forwarding, re-entrancy, error isolation.
+
+### Accurate feature and support matrix (D01)
+
+- **`Documentation~/SUPPORT-MATRIX.md`** classifies every feature as implemented / integrated in
+  client / sample-only / data-contract-only / planned, records per module the dependencies,
+  installation API, update groups, singleton requirements, ownership and teardown, lists the three
+  CI configurations with their floors, the platforms (Editor/Mono only; Android and WebGL
+  unverified), and states that **no measured performance figures exist** in this repository.
+- **`README.md` and `ROADMAP.md` rewritten from the tree.** The README's install URL had pointed at
+  `com.cuvara.dots.git#v0.6.2` for twenty releases and said the package was "not yet compiled
+  against a Unity Editor"; it now names `https://github.com/Cuvara/UnityDots.git#v0.27.1` and the CI
+  rows. The ROADMAP had not been updated since 0.7.0 and still listed the netcode adapter as planned.
+- **Corrections, recorded in `SUPPORT-MATRIX.md § 7`:** the 0.26.0 entry below lists a
+  `CollisionEventSystem` that **does not exist in the source** — `EntityCollision` and
+  `EntityTriggerEvent` have no producer; `MinimapBuffer`'s comment named a `MinimapDataSystem` that
+  does not exist (comment corrected, type marked data-contract-only); `VIEW-PROVISIONING.md` placed
+  `PrimitiveViewAssetProvider` in `Runtime/` (it is sample-only) and described `ViewSortingKey` as
+  applied (it is carried, not applied); the 0.27.0 "lifecycle events" entry added the structs only.
+- **`CameraFollowSystem` and `PhysicsMovementBridge` are documented as having no installer** —
+  both are `[DisableAutoCreation]` and no bootstrap creates them. Installers are in progress on
+  `feat/bootstrap-config` (D04).
+
+### Changed
+
+- **`com.cuvara.netcode` floor moves `0.19.0` → `0.31.0`** in the `versionDefines` of
+  `Cuvara.DOTS.Netcode`, `Cuvara.DOTS.Netcode.Prediction`, both test assemblies, the
+  `NetworkedPrediction` sample, and the new entry in `Cuvara.DOTS.DI`. 0.31.0 is the netcode release
+  the client is adopting; with an older netcode the adapter is absent rather than broken, as before.
+- **CI pins move with it**, as the workflow header requires: `com.cuvara.netcode`
+  `v0.19.0` → `v0.31.0` and `com.rpgmmo.shared-gamelogic` `sgl-v0.2.2` → `sgl-v0.3.0` (netcode
+  0.31.0's declared manual dependency).
+- `MessagePipeVContainer.RegisterMessage<T>` is `internal` rather than `private`, so the lifecycle
+  registration reuses it.
+- `NetworkViewCommandSystem`'s map value is now a `Mirror { Entity, Type, IsLocal }` rather than a
+  bare `Entity`, so a despawn event can be built after the entity is gone.
 
 ## [0.27.1] - 2026-09-06
 

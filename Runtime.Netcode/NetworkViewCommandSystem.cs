@@ -69,6 +69,16 @@ namespace Cuvara.DOTS.Netcode
     /// The work is also bounded by the AOI rather than by anything that grows, so this is tens of
     /// commands per frame, not thousands. Parallelising it would be parallelism for its own sake.
     /// </para>
+    /// <para>
+    /// <b>It is the publisher of <see cref="NetworkEntitySpawned"/> and
+    /// <see cref="NetworkEntityDespawned"/>, and the only one.</b> The id → entity map here is the
+    /// single source of truth for "present in this world", so this is the one place that can promise
+    /// exactly one spawn and one despawn per life of an id: the view's own <c>_live</c> set filters
+    /// duplicates a frame earlier and on another thread, but it counts enqueues, not applied
+    /// entities, and it cannot see an entity a consumer destroyed. Events go to
+    /// <see cref="DotsEntityView.Lifecycle"/> synchronously, after the structural change for a spawn
+    /// and before it for a despawn. See <see cref="NetworkEntityLifecycle"/> for the contract.
+    /// </para>
     /// </remarks>
     // In SnapshotApplyGroup, inside NetcodeSystemGroup, inside InitializationSystemGroup — so
     // entities and transforms written here are seen by this frame's TransformSystemGroup and this
@@ -78,13 +88,28 @@ namespace Cuvara.DOTS.Netcode
     [UpdateInGroup(typeof(SnapshotApplyGroup))]
     internal partial struct NetworkViewCommandSystem : ISystem
     {
-        private NativeHashMap<FixedString64Bytes, Entity> _entities;
+        /// <summary>
+        /// What the map remembers per present id. Type and locality are copied here at spawn so a
+        /// despawn event can be built after the entity is gone — an externally destroyed mirror has
+        /// no <see cref="NetworkEntity"/> left to read them from.
+        /// </summary>
+        internal struct Mirror
+        {
+            public Entity Entity;
+            public FixedString32Bytes Type;
+            public bool IsLocal;
+        }
+
+        private NativeHashMap<FixedString64Bytes, Mirror> _entities;
 
         public void OnCreate(ref SystemState state)
         {
-            _entities = new NativeHashMap<FixedString64Bytes, Entity>(64, Allocator.Persistent);
+            _entities = new NativeHashMap<FixedString64Bytes, Mirror>(64, Allocator.Persistent);
             state.RequireForUpdate<NetworkEntityViewReference>();
         }
+
+        /// <summary>Ids the drain currently holds a mirror for. Tests and teardown.</summary>
+        internal int PresentCount => _entities.IsCreated ? _entities.Count : 0;
 
         public void OnDestroy(ref SystemState state)
         {
@@ -99,6 +124,7 @@ namespace Cuvara.DOTS.Netcode
             var entityManager = state.EntityManager;
             var mapping = view.Mapping;
             var writeHealth = view.WritesHealth;
+            var lifecycle = view.Lifecycle;
 
             // The render clock is read once, mutated in place across the whole drain and written
             // back once. Reading and writing the singleton per command would be a chunk lookup per
@@ -120,16 +146,16 @@ namespace Cuvara.DOTS.Netcode
                 switch (command.Kind)
                 {
                     case NetworkViewCommandKind.Spawn:
-                        ApplySpawn(entityManager, mapping, writeHealth, command);
+                        ApplySpawn(entityManager, mapping, lifecycle, command);
                         break;
 
                     case NetworkViewCommandKind.State:
-                        ApplyState(entityManager, mapping, writeHealth, command,
+                        ApplyState(entityManager, mapping, writeHealth, lifecycle, command,
                                    settings.Config, ref timeline.Clock, timed);
                         break;
 
                     case NetworkViewCommandKind.Despawn:
-                        ApplyDespawn(entityManager, command);
+                        ApplyDespawn(entityManager, lifecycle, command);
                         break;
                 }
             }
@@ -140,13 +166,23 @@ namespace Cuvara.DOTS.Netcode
         private void ApplySpawn(
             EntityManager entityManager,
             in SnapshotSpaceMapping mapping,
-            bool writeHealth,
+            NetworkEntityLifecycle lifecycle,
             in NetworkViewCommand command)
         {
-            // A spawn for an id already mapped is dropped rather than replacing the entity: the view
-            // filters duplicates too, so reaching here means the two disagree, and destroying a live
-            // entity to build an identical one loses whatever a consumer attached to it.
-            if (_entities.ContainsKey(command.Id)) return;
+            if (_entities.TryGetValue(command.Id, out var existing))
+            {
+                // A spawn for an id whose mirror is alive is dropped rather than replacing the
+                // entity: the view filters duplicates too, so reaching here means the two disagree,
+                // and destroying a live entity to build an identical one loses whatever a consumer
+                // attached to it. No event either — the id never stopped being present.
+                if (entityManager.Exists(existing.Entity)) return;
+
+                // The mirror was destroyed behind the adapter's back and the wire is now spawning
+                // the id again (the view forgot it across an AOI exit/re-entry, or a session reset).
+                // Close the first life before opening the second, so the events pair up.
+                PublishDespawned(lifecycle, command.Id, existing, NetworkDespawnReason.ExternalDestruction);
+                _entities.Remove(command.Id);
+            }
 
             var entity = entityManager.CreateEntity();
             var position = mapping.Origin;
@@ -214,25 +250,41 @@ namespace Cuvara.DOTS.Netcode
             entityManager.SetName(entity, (command.IsLocal ? "net:local:" : "net:") + command.Id);
 #endif
 
-            _entities.Add(command.Id, entity);
+            var mirror = new Mirror { Entity = entity, Type = command.Type, IsLocal = command.IsLocal };
+            _entities.Add(command.Id, mirror);
+
+            // After every component is on the entity and after the map records it, so a handler that
+            // queries NetworkEntity or reads the anchor sees a complete mirror, and a handler that
+            // despawns it from inside the callback is refused nothing.
+            if (lifecycle.HasObservers)
+            {
+                lifecycle.PublishSpawned(new NetworkEntitySpawned(
+                    command.Id.ToString(), command.Type.ToString(), command.IsLocal, entity));
+            }
         }
 
         private void ApplyState(
             EntityManager entityManager,
             in SnapshotSpaceMapping mapping,
             bool writeHealth,
+            NetworkEntityLifecycle lifecycle,
             in NetworkViewCommand command,
             in InterpolationConfig interpolation,
             ref InterpolationClock clock,
             bool interpolationInstalled)
         {
-            if (!_entities.TryGetValue(command.Id, out var entity)) return;
+            if (!_entities.TryGetValue(command.Id, out var mirror)) return;
+
+            var entity = mirror.Entity;
             if (!entityManager.Exists(entity))
             {
                 // Destroyed by something other than a despawn command — a consumer's own system, or
                 // the death system when writeHealth is on. Drop the stale mapping so a later spawn
-                // of the same id is not refused by ApplySpawn's duplicate check.
+                // of the same id is not refused by ApplySpawn's duplicate check, and report the end
+                // of this life now: the wire will keep sending state for the id, and a later wire
+                // despawn finds nothing in the map and stays silent, so this is the one report.
                 _entities.Remove(command.Id);
+                PublishDespawned(lifecycle, command.Id, mirror, NetworkDespawnReason.ExternalDestruction);
                 return;
             }
 
@@ -372,16 +424,78 @@ namespace Cuvara.DOTS.Netcode
             return true;
         }
 
-        private void ApplyDespawn(EntityManager entityManager, in NetworkViewCommand command)
+        private void ApplyDespawn(EntityManager entityManager, NetworkEntityLifecycle lifecycle, in NetworkViewCommand command)
         {
-            if (!_entities.TryGetValue(command.Id, out var entity)) return;
+            if (!_entities.TryGetValue(command.Id, out var mirror)) return;
 
             _entities.Remove(command.Id);
+
+            // Before the destroy, so a handler can read the entity's last state for a despawn effect.
+            // The reason is Despawned even if the entity turns out to be gone already: the wire said
+            // it left, and that is the fact being reported.
+            PublishDespawned(lifecycle, command.Id, mirror, NetworkDespawnReason.Despawned);
 
             // Destroying the entity is the whole despawn: EntityViewLinkCleanup survives the
             // destruction and EntityViewDespawnSystem recycles the view from it next presentation.
             // Reaching into the registry from here would double-free it.
-            if (entityManager.Exists(entity)) entityManager.DestroyEntity(entity);
+            if (entityManager.Exists(mirror.Entity)) entityManager.DestroyEntity(mirror.Entity);
+        }
+
+        /// <summary>
+        /// Ends every present life at once: one <see cref="NetworkEntityDespawned"/> per mapped id,
+        /// then the mirror entities are destroyed and the map is emptied. Called by
+        /// <c>DotsNetcodeBootstrap.Uninstall(world, destroyMirrors: true)</c>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The reason is <see cref="NetworkDespawnReason.Teardown"/> for a mirror that still exists
+        /// and <see cref="NetworkDespawnReason.ExternalDestruction"/> for one that does not — the
+        /// latter is a life that ended earlier and was never reported because no command for the id
+        /// arrived in between. Either way each id is reported once, and a <c>Despawn</c> command still
+        /// sitting in the view's queue afterwards finds an empty map and publishes nothing.
+        /// </para>
+        /// <para>
+        /// Order is the map's iteration order, which is not the spawn order. A consumer that needs
+        /// ordered teardown drains <c>WorldViewBinder.Reset</c> through a tick first, which reaches
+        /// <see cref="ApplyDespawn"/> in the binder's order.
+        /// </para>
+        /// </remarks>
+        internal void Teardown(EntityManager entityManager, NetworkEntityLifecycle lifecycle)
+        {
+            if (!_entities.IsCreated || _entities.Count == 0) return;
+
+            // Snapshot the map before publishing: a handler is allowed to call anything on the
+            // EntityManager, and the map must already be in its final state if one of them asks
+            // the drain a question through the view.
+            var ids = _entities.GetKeyArray(Allocator.Temp);
+            var mirrors = _entities.GetValueArray(Allocator.Temp);
+            _entities.Clear();
+
+            for (var i = 0; i < ids.Length; i++)
+            {
+                var alive = entityManager.Exists(mirrors[i].Entity);
+                PublishDespawned(lifecycle, ids[i], mirrors[i],
+                    alive ? NetworkDespawnReason.Teardown : NetworkDespawnReason.ExternalDestruction);
+                if (alive) entityManager.DestroyEntity(mirrors[i].Entity);
+            }
+
+            ids.Dispose();
+            mirrors.Dispose();
+        }
+
+        private static void PublishDespawned(
+            NetworkEntityLifecycle lifecycle,
+            in FixedString64Bytes id,
+            in Mirror mirror,
+            NetworkDespawnReason reason)
+        {
+            // Gated on observers, as the spawn publish is: the event carries managed strings, and an
+            // unobserved session should not allocate two of them per AOI transition. The counters on
+            // the hub therefore describe delivered events, not lives.
+            if (!lifecycle.HasObservers) return;
+
+            lifecycle.PublishDespawned(new NetworkEntityDespawned(
+                id.ToString(), mirror.Type.ToString(), mirror.IsLocal, mirror.Entity, reason));
         }
     }
 }

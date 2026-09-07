@@ -71,6 +71,7 @@ namespace Cuvara.DOTS.Samples.NetworkedPrediction
         private ViewConfig[] _configs;
         private PrimitiveViewProvider _provider;
         private DotsEntityView _view;
+        private NetworkLifecycleLog _lifecycleLog;
         private WorldViewBinder _binder;
         private NetworkClient _client;
         private LocalMovePredictor _predictor;
@@ -116,6 +117,10 @@ namespace Cuvara.DOTS.Samples.NetworkedPrediction
 
             _view = new DotsEntityView(_catalog, resolver, SnapshotSpaceMapping.XZPlane);
             DotsNetcodeBootstrap.Install(_world, _view);
+
+            // Subscribed before the first snapshot can arrive, because the events are not retroactive:
+            // a subscriber attached after a spawn hears nothing about it.
+            _lifecycleLog = new NetworkLifecycleLog(_view.Lifecycle);
 
             _binder = new WorldViewBinder(_view);
 
@@ -189,9 +194,15 @@ namespace Cuvara.DOTS.Samples.NetworkedPrediction
             if (_world is { IsCreated: true })
             {
                 DotsPredictionBootstrap.Uninstall(_world);
-                DotsNetcodeBootstrap.Uninstall(_world);
+
+                // destroyMirrors: every id still present gets one NetworkEntityDespawned(Teardown)
+                // — visible in the Console as the last lines the log prints — and the mirror
+                // entities go with the session instead of outliving it in the default world.
+                DotsNetcodeBootstrap.Uninstall(_world, destroyMirrors: true);
                 DotsViewBootstrap.Uninstall(_world);
             }
+
+            _lifecycleLog?.Dispose();
 
             _catalog?.Dispose();
             if (_library != null) Destroy(_library);
@@ -247,7 +258,7 @@ namespace Cuvara.DOTS.Samples.NetworkedPrediction
         {
             if (_client == null) return;
 
-            var box = new Rect(10, 10, 460, 250);
+            var box = new Rect(10, 10, 460, 380);
             GUI.Box(box, "Networked prediction sample");
 
             var y = 32f;
@@ -261,7 +272,9 @@ namespace Cuvara.DOTS.Samples.NetworkedPrediction
             Line($"tick {_client.World.Tick}   ack {_client.World.AckTick}   entities {_client.World.Count}");
 
             // (1) the adapter spawned from real snapshots, and (3) exactly one entity is predicted.
-            Line($"mirror entities: {_mirrors.CalculateEntityCount()}    predicted: {_predicted.CalculateEntityCount()}");
+            // `present` is the lifecycle events' own tally; it must equal `mirror entities`.
+            Line($"mirror entities: {_mirrors.CalculateEntityCount()}    predicted: {_predicted.CalculateEntityCount()}" +
+                 $"    present (events): {_lifecycleLog?.Present ?? 0}");
 
             var live = "";
             foreach (var pair in _provider.Live) live += $"{pair.Key}={pair.Value}  ";
@@ -291,6 +304,14 @@ namespace Cuvara.DOTS.Samples.NetworkedPrediction
             else
             {
                 Line("no local mirror entity yet");
+            }
+
+            // (5) the lifecycle events fire once per spawn and once per despawn, with the reason the
+            // adapter can honestly state. AOI churn shows here as a `-`/`+` pair for the same id.
+            Line("lifecycle:");
+            if (_lifecycleLog != null)
+            {
+                foreach (var line in _lifecycleLog.Lines) Line("  " + line);
             }
         }
 

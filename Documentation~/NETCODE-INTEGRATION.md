@@ -5,7 +5,7 @@ server entities as ECS entities with interpolation and prediction.
 
 ## Prerequisites
 
-- `com.cuvara.netcode` >= 0.19.0 (enforced by asmdef `versionDefines`)
+- `com.cuvara.netcode` >= 0.31.0 (enforced by asmdef `versionDefines`; 0.19.0 through 0.27.1)
 - `com.cuvara.dots` installed
 
 When netcode is absent, the `Cuvara.DOTS.Netcode` assembly is not compiled and the
@@ -82,6 +82,14 @@ Controls how server `(x, y)` maps to Unity world coordinates:
 
 Per-art height offset belongs in `ViewConfig.PositionOffset`, not in the mapping.
 
+## Lifecycle events
+
+Each replicated id publishes `NetworkEntitySpawned` when its mirror entity is created and exactly
+one `NetworkEntityDespawned` when it stops being present — wire despawn, external destruction or
+teardown, never "died". Subscribe on `view.Lifecycle`; `DotsNetcodeBootstrap.Uninstall(world,
+destroyMirrors: true)` ends every remaining life at session end. Full contract, ordering and the
+scripted sequences: `NETWORK-LIFECYCLE.md`.
+
 ## Important constraints
 
 1. **No interpolation arithmetic in this package.** All interpolation calls go
@@ -91,3 +99,5 @@ Per-art height offset belongs in `ViewConfig.PositionOffset`, not in the mapping
 3. **Wire HP → `NetworkEntityState`, not `Health`.** `Health` means "destroy at
    zero" in this package. Mirroring server HP into it would let a client-side
    system destroy an entity the server still lists.
+4. **A despawn is not a death.** The wire does not distinguish an AOI exit from a
+   removal; neither does `NetworkEntityDespawned.Reason`.
