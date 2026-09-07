@@ -74,7 +74,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `PooledViewAssetProvider` diagnostics: `TotalInstanceCount`, `IsDisposed`, `OwnsPoolRoot`,
   `PoolRoot`, `MaxPoolSize`, `MaxActivePerKey`, `IsOwned`, `TryGetKey`, `IsAcquired`,
   `SweepDestroyed()`.
-- Tests: `PooledViewAssetProviderOwnershipTests` (21) and `ChunkProvisioningEpochTests` (17) with a
+- `PooledViewAssetProvider.IsRegistered(key)` / `RegisteredKeys` — read-only registration query
+  for a `ViewConfigValidator` `prefabExists` callback; independent of warmth or instance counts.
+- Tests: `PooledViewAssetProviderOwnershipTests` (22) and `ChunkProvisioningEpochTests` (17) with a
   `ManualViewAssetProvider` fake whose loads stay pending until the test settles them.
 - `Documentation~/VIEW-PROVISIONING.md`: ownership/disposal/cancellation contracts, pool cap
   versus admission budget, chunk state machine and failure semantics.

@@ -169,6 +169,15 @@ namespace Cuvara.DOTS.Provisioning
         /// <summary>Number of registered prefab keys.</summary>
         public int RegisteredKeyCount => _prefabs.Count;
 
+        /// <summary>
+        /// Whether a prefab is registered for <paramref name="key"/>. Says nothing about warmth or
+        /// instances — the query a config validator's <c>prefabExists</c> callback wants.
+        /// </summary>
+        public bool IsRegistered(string key) => key != null && _prefabs.ContainsKey(key);
+
+        /// <summary>Every key with a registered prefab. Live view; do not mutate the provider while enumerating.</summary>
+        public IEnumerable<string> RegisteredKeys => _prefabs.Keys;
+
         /// <summary>True once <see cref="Dispose"/> has run.</summary>
         public bool IsDisposed => _disposed;
 

@@ -44,7 +44,9 @@ namespace Cuvara.DOTS.Tests.Editor
             _prefab2 = new GameObject("GoblinPrefabV2");
             _prefab2.SetActive(false);
             _root = new GameObject("[CallerOwnedRoot]").transform;
-            _provider = new PooledViewAssetProvider(_root, defaultPoolSize: 2, maxPoolSize: 4);
+            // defaultPoolSize 1: PrewarmAsync creates max(count, defaultPoolSize) instances, and the
+            // identity tests below prewarm exactly one so the pooled count is unambiguous.
+            _provider = new PooledViewAssetProvider(_root, defaultPoolSize: 1, maxPoolSize: 4);
             _provider.RegisterPrefab("goblin", _prefab);
         }
 
@@ -360,6 +362,18 @@ namespace Cuvara.DOTS.Tests.Editor
             var fresh = Acquire();
             StringAssert.Contains("GoblinPrefabV2", fresh.name, "new acquires come from the new prefab");
             AssertCountsReconcile();
+        }
+
+        [Test]
+        public void IsRegistered_AndRegisteredKeys_ReflectRegistrationOnly()
+        {
+            Assert.IsTrue(_provider.IsRegistered("goblin"));
+            Assert.IsFalse(_provider.IsRegistered("unknown"));
+            Assert.IsFalse(_provider.IsRegistered(null));
+            CollectionAssert.AreEquivalent(new[] { "goblin" }, _provider.RegisteredKeys);
+
+            _provider.Release("goblin"); // drops instances and warmth, not the registration
+            Assert.IsTrue(_provider.IsRegistered("goblin"));
         }
 
         [Test]
