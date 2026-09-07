@@ -7,6 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`ChunkViewProvisioner` requires a cascade sink (breaking).** The `cascadeSink` constructor
+  parameter is no longer optional; passing `null` throws `ArgumentNullException`. A streaming world
+  passes `EntityViewCascade`; a context with no view layer says so explicitly with the new
+  `NullViewCascadeSink.Instance`. Releasing without a sink stranded every live view standing on the
+  released keys, and that hazard is now refused at construction instead of discovered at the first
+  unload. `Runtime.DI` and the HybridViews sample already passed a sink; only tests constructed
+  without one.
+- **`PooledViewAssetProvider` tracks identity per instance, not by name.** A lease table maps every
+  instance the provider created to its key, prefab-registration generation and acquired/pooled
+  state. `GameObject.name` is still set for the hierarchy view but nothing reads it back, so
+  renaming an instance no longer loses its pool. Return policies are now explicit: a duplicate
+  return is ignored (`DuplicateReleaseCount`) and can never enqueue the same object twice; a
+  foreign instance — one the provider did not create — is left untouched (`ForeignReleaseCount`)
+  where it used to be destroyed; an externally destroyed instance drops its lease
+  (`ExternallyDestroyedCount`).
+- **`PooledViewAssetProvider.Dispose` honours root ownership.** A caller-supplied `poolRoot` is
+  emptied of the provider's instances but never destroyed; only a root the provider created
+  (`poolRoot == null`, see `OwnsPoolRoot`) goes with it. Outstanding acquired instances are
+  reclaimed per the new `OutstandingLeasePolicy` (default `Destroy`; `Detach` transfers ownership
+  to the holder) and their count is logged as a warning — no silent tracking loss. Dispose is
+  idempotent; `RegisterPrefab`/`PrewarmAsync`/`Acquire`/`AcquireAsync` throw
+  `ObjectDisposedException` afterwards, while `ReleaseInstance`/`Release` are no-ops so a despawn
+  system that tears down after the pool does not throw.
+- **`PooledViewAssetProvider.RegisterPrefab` with a different prefab replaces the key.** Pooled
+  instances of the old prefab are destroyed and the key is un-warmed; acquired instances keep
+  running and are destroyed rather than pooled when returned. Re-registering the same prefab is a
+  no-op (previously every call silently overwrote).
+- **`PooledViewAssetProvider` honours `CancellationToken`.** `PrewarmAsync` and `AcquireAsync`
+  return a cancelled task before doing any work when the token is already cancelled, and prewarm
+  checks the token between instantiations; what was already created is tracked and pooled, so a
+  mid-loop cancel leaks nothing and leaves the key un-warm.
+- `ChunkViewProvisioner.ReleaseAll` gained an `includeSession` parameter (default `false`).
+- `ChunkState` documents its legal transitions; `Pending` is documented as reserved and never
+  emitted.
+
+### Added
+
+- `ChunkViewProvisioner` **epochs**: every `PrewarmChunkAsync` stamps the chunk with a fresh epoch
+  before awaiting, and the completion marks the chunk warm only if that epoch is still current. A
+  release or re-warm that lands mid-load makes the older completion a no-op — no `ChunkWarmed`, no
+  state change, no resurrected chunk.
+- `ChunkViewProvisioner` **failure and retry**: a prewarm that faults or is cancelled while its
+  epoch is current rolls the chunk back through the ordinary release path (cascade included), marks
+  the keys it tried to warm not-warm so the next requester re-issues the load, transitions the
+  chunk to the new `ChunkState.Failed` and removes it, then rethrows to the awaiting caller.
+  Retrying is a plain `PrewarmChunkAsync` with the same id. Counters reconcile on every path.
+- `ChunkViewProvisioner` **main-thread affinity**: every public member throws
+  `InvalidOperationException` when called off the constructing thread, including the post-await
+  continuation, so a provider completing on a worker thread without Unity's synchronization
+  context fails loudly instead of mutating the pool off-thread.
+- `ChunkViewProvisioner` **session-owned assets**: `PinSessionKeysAsync` / `ReleaseSessionKeys` /
+  `IsSessionPinned` hold references under the reserved id `ChunkViewProvisioner.SessionId` so no
+  chunk release can drop the last reference to a session-wide key; `ChunkCount` excludes the pin
+  and `ReleaseAll()` leaves it alone unless `includeSession: true`.
+- `NullViewCascadeSink` — the explicit, greppable "no view layer exists" sink.
+- `IPooledViewLifecycle` — narrow host hook (`OnAcquired` after activation, `OnReleased` before
+  deactivation) for resetting animator/particle/subscription state; optional constructor argument
+  on `PooledViewAssetProvider`.
+- `PooledViewAssetProvider` **admission budget**: `maxActivePerKey` constructor argument (0 =
+  unlimited). `maxPoolSize` bounds only *inactive* instances and never bounded the total; the
+  budget is the knob that does, and a refused `Acquire` returns `null` and increments
+  `AdmissionRejectedCount`.
+- `PooledViewAssetProvider` diagnostics: `TotalInstanceCount`, `IsDisposed`, `OwnsPoolRoot`,
+  `PoolRoot`, `MaxPoolSize`, `MaxActivePerKey`, `IsOwned`, `TryGetKey`, `IsAcquired`,
+  `SweepDestroyed()`.
+- Tests: `PooledViewAssetProviderOwnershipTests` (21) and `ChunkProvisioningEpochTests` (17) with a
+  `ManualViewAssetProvider` fake whose loads stay pending until the test settles them.
+- `Documentation~/VIEW-PROVISIONING.md`: ownership/disposal/cancellation contracts, pool cap
+  versus admission budget, chunk state machine and failure semantics.
+
 ## [0.27.1] - 2026-09-06
 
 ### Fixed

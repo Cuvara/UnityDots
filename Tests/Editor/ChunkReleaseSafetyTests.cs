@@ -157,11 +157,19 @@ namespace Cuvara.DOTS.Tests.Editor
         }
 
         [Test]
-        public void WithoutACascadeSink_ReleaseStillHappens_AndIsDocumentedAsUnsafe()
+        public void WithoutACascadeSink_ConstructionIsRejected()
         {
-            // Pinned so the hazard is a decision someone made rather than an accident: with no sink
-            // the provisioner cannot reach the view layer at all.
-            var provisioner = new ChunkViewProvisioner(_provider);
+            // With no sink the provisioner cannot reach the view layer at all, so a release would
+            // strand every live view on the released keys. That is refused up front rather than
+            // discovered at the first streaming unload.
+            Assert.Throws<System.ArgumentNullException>(() => new ChunkViewProvisioner(_provider, null));
+        }
+
+        [Test]
+        public void NullSink_IsTheExplicitOptOut_AndReleasesWithoutCascading()
+        {
+            // Where no view layer exists the opt-out is a named type a reviewer can grep for.
+            var provisioner = new ChunkViewProvisioner(_provider, NullViewCascadeSink.Instance);
             provisioner.PrewarmChunkAsync("chunk-a", new[] { "goblin" });
 
             var result = provisioner.ReleaseChunk("chunk-a");

@@ -33,7 +33,9 @@ syncs transforms every frame. Despawn returns the instance to the pool.
 
 `ChunkViewProvisioner` warms and releases view assets per world chunk. When a chunk
 unloads, views standing on its expiring keys are cascade-despawned first, then the
-assets are released. Keys shared with other chunks survive.
+assets are released. Keys shared with other chunks survive. The cascade sink is a
+required constructor argument; session-wide keys are pinned with `PinSessionKeysAsync`
+so no chunk release can drop them. Contracts: `VIEW-PROVISIONING.md`.
 
 ### Netcode adapter
 

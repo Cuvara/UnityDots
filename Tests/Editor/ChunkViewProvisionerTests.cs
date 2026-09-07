@@ -16,7 +16,7 @@ namespace Cuvara.DOTS.Tests.Editor
         public void SetUp()
         {
             _provider = new RecordingViewAssetProvider();
-            _provisioner = new ChunkViewProvisioner(_provider);
+            _provisioner = new ChunkViewProvisioner(_provider, NullViewCascadeSink.Instance);
         }
 
         [Test]
