@@ -59,6 +59,7 @@ namespace Cuvara.DOTS.Physics
             var simulation = world.GetOrCreateSystemManaged<SimulationSystemGroup>();
             var gameplay = world.GetOrCreateSystemManaged<GameplaySystemGroup>();
             var movement = world.GetOrCreateSystemManaged<MovementSystemGroup>();
+            simulation.AddSystemToUpdateList(world.GetOrCreateSystemManaged<Unity.Transforms.TransformSystemGroup>());
             simulation.AddSystemToUpdateList(gameplay);
             gameplay.AddSystemToUpdateList(movement);
             movement.AddSystemToUpdateList(world.GetOrCreateSystem<PhysicsMovementBridge>());

@@ -55,10 +55,20 @@ namespace Cuvara.DOTS.Tests.Physics
         /// </summary>
         private static void AddPhysicsPipeline(World world)
         {
-            var physicsSystems = TypeManager.GetSystems(WorldSystemFilterFlags.Default)
-                .Where(t => t.Namespace != null && t.Namespace.StartsWith("Unity.Physics"))
-                .ToList();
-            DefaultWorldInitialization.AddSystemsToRootLevelSystemGroups(world, physicsSystems);
+            // Only Unity.Physics.Systems — the simulation itself. GraphicsIntegration (smoothing for
+            // rendered rigid bodies) and the debug-display group need presentation groups this world
+            // has no use for. The Unity groups the physics systems declare as parents are listed
+            // too: AddSystemsToRootLevelSystemGroups creates the three root groups but adds a
+            // system to a declared parent only if that parent is in the list or already exists.
+            var systems = new List<System.Type>
+            {
+                typeof(FixedStepSimulationSystemGroup),
+                typeof(TransformSystemGroup),
+                typeof(LateSimulationSystemGroup),
+            };
+            systems.AddRange(TypeManager.GetSystems(WorldSystemFilterFlags.Default)
+                .Where(t => t.Namespace == "Unity.Physics.Systems"));
+            DefaultWorldInitialization.AddSystemsToRootLevelSystemGroups(world, systems);
 
             // No gravity: the bodies below must stay where they are put.
             var step = PhysicsStep.Default;

@@ -115,11 +115,15 @@ namespace Cuvara.DOTS.Views
         {
             if (world == null) throw new ArgumentNullException(nameof(world));
 
+            // The whole view tree, not the two groups the camera orders against. A partial tree —
+            // ViewTransformSyncGroup without the ViewLifecycleGroup its [UpdateAfter] names — makes
+            // Entities drop that relation with a warning at sort time, and a consumer installing the
+            // camera before the views would see the view groups run in an order their attributes
+            // do not describe. The view systems this creates idle until a registry is installed.
+            DotsViewBootstrap.InstallSystems(world);
+
             var presentation = world.GetOrCreateSystemManaged<PresentationSystemGroup>();
             var view = world.GetOrCreateSystemManaged<ViewSystemGroup>();
-            var sync = world.GetOrCreateSystemManaged<ViewTransformSyncGroup>();
-            presentation.AddSystemToUpdateList(view);
-            view.AddSystemToUpdateList(sync);
             view.AddSystemToUpdateList(world.GetOrCreateSystemManaged<CameraFollowSystem>());
             presentation.SortSystems();
         }

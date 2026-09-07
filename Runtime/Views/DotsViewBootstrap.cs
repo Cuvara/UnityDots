@@ -135,6 +135,12 @@ namespace Cuvara.DOTS.Views
             var simulation = world.GetOrCreateSystemManaged<SimulationSystemGroup>();
             var presentation = world.GetOrCreateSystemManaged<PresentationSystemGroup>();
 
+            // GameplaySystemGroup declares [UpdateBefore(TransformSystemGroup)]. In the default world
+            // that group already exists; in a hand-built one (tests, a headless world) it does not,
+            // and Entities then drops the relation with a warning at sort time. Creating the empty
+            // group makes the declared order real in every world the bootstrap installs into.
+            simulation.AddSystemToUpdateList(world.GetOrCreateSystemManaged<Unity.Transforms.TransformSystemGroup>());
+
             var netcode = world.GetOrCreateSystemManaged<NetcodeSystemGroup>();
             var provisioning = world.GetOrCreateSystemManaged<ProvisioningSystemGroup>();
             initialization.AddSystemToUpdateList(netcode);

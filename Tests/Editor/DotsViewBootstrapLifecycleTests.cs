@@ -38,12 +38,11 @@ namespace Cuvara.DOTS.Tests.Editor
             }
         }
 
-        private static void Tick(World world)
-        {
-            world.GetExistingSystem<EntityViewDespawnSystem>().Update(world.Unmanaged);
-            world.GetExistingSystem<EntityViewSpawnSystem>().Update(world.Unmanaged);
-            world.GetExistingSystem<EntityViewTransformSyncSystem>().Update(world.Unmanaged);
-        }
+        /// <summary>
+        /// One presentation frame through the real group, so despawn → spawn → sync → overlay run in
+        /// the order the bootstrap sorted them — the same drive the overlay consumer tests use.
+        /// </summary>
+        private static void Tick(World world) => world.GetExistingSystemManaged<ViewSystemGroup>().Update();
 
         private static Entity CreateRequest(World world, string key)
         {
@@ -116,6 +115,7 @@ namespace Cuvara.DOTS.Tests.Editor
 
             // Temporary disable: the systems are still there and idle.
             Assert.AreNotEqual(SystemHandle.Null, _world.GetExistingSystem<EntityViewSpawnSystem>());
+            Assert.IsNotNull(_world.GetExistingSystemManaged<ViewSystemGroup>());
             Assert.DoesNotThrow(() => Tick(_world), "idle systems tick harmlessly without a registry");
             Assert.AreEqual(0, _provider.LiveInstances);
         }
@@ -238,7 +238,6 @@ namespace Cuvara.DOTS.Tests.Editor
                 var entity = CreateRequest(world, "goblin");
                 world.EntityManager.AddComponentData(entity, new ViewOverlayAnchor { WorldOffset = new float3(0f, 2f, 0f) });
                 Tick(world);
-                world.GetExistingSystem<ViewOverlaySystem>().Update(world.Unmanaged);
 
                 ViewOverlayBuffer buffer;
                 using (var query = world.EntityManager.CreateEntityQuery(ComponentType.ReadOnly<ViewOverlayBuffer>()))
