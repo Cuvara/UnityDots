@@ -282,7 +282,7 @@ Implement your own if you have a different pool or asset system — the client p
 
 ## Sorting keys
 
-`ViewSortingKey` is **carried, not applied**. `EntityViewSpawnSystem` copies a config's
-sorting layer/order onto the entity and nothing in the package writes it to a
-`SpriteRenderer` — the 2D branch is a planned item. Treat the component as authoring data
-until `SUPPORT-MATRIX.md` says otherwise.
+`ViewSortingKey` is **carried, not applied, and formally unsupported** until a 2D consumer
+exists. `EntityViewSpawnSystem` copies a config's sorting layer/order onto the entity and nothing
+in the package writes it to a `SpriteRenderer`. The decision and its reasons are recorded in
+`MINIMAP-OVERLAY.md § 2D sorting`; treat the component as authoring data.

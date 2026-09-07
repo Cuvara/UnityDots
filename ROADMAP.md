@@ -45,12 +45,12 @@ Two rules constrain everything below.
 | Networked Prediction sample | 0.14.0 | sample-only | End-to-end against a live backend; overlay of server vs drawn position. |
 | Stress Benchmark sample | 0.25.0 | sample-only, **excluded from CI**; no results recorded | Tier ramp is configuration, not a measurement. |
 | Physics helpers | 0.26.0 / 0.26.1 | implemented, untested, not in CI | `PhysicsBodyFactory`, `SpatialQuery`, `PhysicsMovementBridge` (no installer). **No collision/trigger collector** — `EntityCollision`/`EntityTriggerEvent` are data-contract-only. |
-| View overlay anchors | 0.26.0 | implemented producer, no consumer | `ViewOverlayAnchor` → `ViewOverlayBuffer` via `ViewOverlaySystem`; host owns projection and UI. |
+| View overlay feed | 0.26.0; contract + helpers on `feat/matrix-events` | implemented (13 tests), sample consumer; not in client | `ViewOverlayAnchor` → `ViewOverlayBuffer` via `ViewOverlaySystem` (no longer stale on empty set; entries carry `Entity`); `ViewOverlayProjection` + `ViewOverlayReconciler<T>` implement the consumer contract in `Documentation~/MINIMAP-OVERLAY.md`. Host owns camera and UI. |
 | Editor debug window | 0.26.0 | implemented, untested | Window › Cuvara › DOTS View Debug. |
 | `PooledViewAssetProvider` | 0.27.0 | implemented (12 tests); not in client | SetActive pool. Identity/ownership/disposal fixes in progress (D02). |
 | `EntityArchetypePreset` + `ArchetypeFactory` | 0.27.0 | implemented (8 tests); not in client | Component presets. Validation in progress (D05). |
 | `CameraFollowSystem` | 0.27.0 | implemented system, **no installer**, untested | `Camera.main` only; needs `CameraFollowConfig` + one `CameraFollowTarget`. |
-| `MinimapEntry` / `MinimapBuffer` | 0.27.0 | **data-contract-only** | No producer exists. |
+| Minimap module | types 0.27.0; **producer on `feat/matrix-events`** | implemented (23 tests), sample consumer; not in client | `MinimapMarker` opt-in, `MinimapDataSystem` producer, `MinimapBootstrap` module (Session); netcode adapter marks mirrors through `IMinimapCategoryResolver`, so the map shows only what the server replicated. |
 | Network lifecycle events | structs 0.27.0; **published on `feat/matrix-events`** | implemented (24 tests), sample consumer, DI wiring; not yet in client | `NetworkEntitySpawned`/`Despawned` with `Entity`+version and `NetworkDespawnReason`; `NetworkEntityLifecycle`; `Uninstall(destroyMirrors)`. Contract: `Documentation~/NETWORK-LIFECYCLE.md`. |
 
 ## In progress
@@ -62,17 +62,17 @@ improvement plan §9:
 |---|---|---|
 | `feat/pool-chunk` | D02, D03 | `PooledViewAssetProvider` identity/ownership/disposal; `ChunkViewProvisioner` cancellation and state transitions. Everything under `Runtime/Provisioning/`. |
 | `feat/bootstrap-config` | D04, D05 (D09 camera behaviour, D07 physics installer as they land) | Explicit install/uninstall for camera, physics and other optional systems; `ViewConfig`/`ArchetypeFactory` validation. |
-| `feat/matrix-events` | D01, D06 | This file, `SUPPORT-MATRIX.md`, netcode floor 0.31.0, lifecycle event publishing. |
+| `feat/matrix-events` | D01, D06, D08 | This file, `SUPPORT-MATRIX.md`, netcode floor 0.31.0, lifecycle event publishing, minimap producer + overlay consumer contract, 2D sorting marked unsupported. |
 
 Descriptions of provisioning, camera and physics elsewhere in this document are **0.27.1
 behaviour**; they will be updated when those branches merge.
 
 ## Planned, in order
 
-1. **Finish advertised modules before adding new ones** (plan §5): minimap producer (D08),
-   collision/trigger collector with versioned entity identity (D07, only if physics is a release
-   requirement), camera no-target/multi-target behaviour (D09), either apply `ViewSortingKey` in a
-   dedicated 2D path or keep it marked unsupported (D08).
+1. **Finish advertised modules before adding new ones** (plan §5): collision/trigger collector
+   with versioned entity identity (D07, only if physics is a release requirement). D08 (minimap,
+   overlays) and D09 (camera) are done on their branches; `ViewSortingKey` stays **unsupported**
+   until a 2D consumer exists (E07).
 2. **Ingestion and transform ownership** (D10): instrument the command queue, per-session ingestion
    ownership so late data cannot respawn old entities, one interpolation path per entity.
 3. **Measured performance** (D11): profiler markers, allocation and queue metrics, then targeted

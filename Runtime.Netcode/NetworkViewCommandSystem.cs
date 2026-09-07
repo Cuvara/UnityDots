@@ -298,6 +298,17 @@ namespace Cuvara.DOTS.Netcode
                 entityManager.AddComponentData(entity, new ViewConfigRef { Index = command.ConfigIndex, Version = command.ConfigVersion });
             }
 
+            // On the map only if the consumer's resolver said so, and only because this is a mirror:
+            // the server listed the id, so showing it reveals nothing the area of interest withheld.
+            if (command.MinimapCategory >= 0)
+            {
+                entityManager.AddComponentData(entity, new MinimapMarker
+                {
+                    Category = command.MinimapCategory,
+                    IsLocal = command.IsLocal,
+                });
+            }
+
 #if UNITY_EDITOR
             entityManager.SetName(entity, (command.IsLocal ? "net:local:" : "net:") + command.Id);
 #endif
