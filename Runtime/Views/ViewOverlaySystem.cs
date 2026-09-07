@@ -60,12 +60,24 @@ namespace Cuvara.DOTS.Views
             state.Dependency.Complete();
         }
 
+        /// <summary>
+        /// Releases the buffer this system allocated. Runs on world disposal — the permanent
+        /// teardown — never on a module uninstall, which leaves the system created and idle.
+        /// </summary>
+        /// <remarks>
+        /// The collect job is completed inside <see cref="OnUpdate"/>, so no job can still hold
+        /// <c>Entries</c> here; <c>CompleteDependency</c> is the belt to that brace, for the case of
+        /// a consumer system that chained off this one's <c>Dependency</c> in the same frame.
+        /// </remarks>
         public void OnDestroy(ref SystemState state)
         {
+            state.CompleteDependency();
+
             if (SystemAPI.ManagedAPI.HasSingleton<ViewOverlayBuffer>())
             {
                 var buffer = SystemAPI.ManagedAPI.GetSingleton<ViewOverlayBuffer>();
                 if (buffer.Entries.IsCreated) buffer.Entries.Dispose();
+                buffer.Entries = default;
             }
         }
     }

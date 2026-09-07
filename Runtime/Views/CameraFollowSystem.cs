@@ -21,6 +21,12 @@ namespace Cuvara.DOTS.Views
     /// Uses smooth damp (exponential decay) rather than lerp, so the camera converges
     /// at a speed independent of frame rate.
     /// </para>
+    /// <para>
+    /// Installed and removed by <see cref="CameraFollowBootstrap"/>, never by hand: the bootstrap
+    /// validates the config and records the module's owner. Two <see cref="CameraFollowTarget"/>s
+    /// at once is a consumer error that is reported once and skipped, rather than a
+    /// <c>GetSingleton</c> exception thrown every frame from inside the presentation group.
+    /// </para>
     /// </remarks>
     [DisableAutoCreation]
     [UpdateInGroup(typeof(ViewSystemGroup))]
@@ -29,6 +35,7 @@ namespace Cuvara.DOTS.Views
     {
         private EntityQuery _targetQuery;
         private float3 _velocity;
+        private bool _reportedTargetCount;
 
         protected override void OnCreate()
         {
@@ -44,6 +51,23 @@ namespace Cuvara.DOTS.Views
         {
             var camera = Camera.main;
             if (camera == null) return;
+
+            var targets = _targetQuery.CalculateEntityCount();
+            if (targets != 1)
+            {
+                if (!_reportedTargetCount)
+                {
+                    _reportedTargetCount = true;
+                    Debug.LogError(
+                        $"[Cuvara.DOTS] CameraFollowSystem found {targets} entities tagged CameraFollowTarget; " +
+                        "exactly one is required. Remove the tag from every entity but the local player. " +
+                        "The camera holds still until this is fixed. This is reported once.");
+                }
+
+                return;
+            }
+
+            _reportedTargetCount = false;
 
             var config = SystemAPI.ManagedAPI.GetSingleton<CameraFollowConfig>();
             var targetPos = _targetQuery.GetSingleton<LocalToWorld>().Position;
