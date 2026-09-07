@@ -205,6 +205,22 @@ despawn per life of a replicated id**. Contract: `Documentation~/NETWORK-LIFECYC
   when the catalog version changes.
 - `Documentation~/MODULE-LIFECYCLE.md`, `Documentation~/CONFIG-VALIDATION.md` (incl. the prefab
   replacement contract for providers).
+- **Camera behaviour and lifecycle (D09).** `CameraFollowMath` — the follow step as a pure
+  function: a `float3` port of `Vector3.SmoothDamp` (held to 1e-4 against Unity's in tests) plus
+  a hard `MaxSpeed * dt` per-frame clamp so `MaxSpeed` means what it says; `dt <= 0` holds
+  (paused frames never jump); non-finite targets hold, a non-finite camera recovers by snapping.
+  `CameraFollowConfig` gains `Camera` (supplied camera; null = `Camera.main`),
+  `MultipleTargets` (`HoldAndReport` | `FollowLowestIndex`), `TargetSwitch` (`Snap` | `Smooth`)
+  and `TeleportDistance` (snap beyond it; 0 disables). `CameraFollowSystem` never calls
+  `GetSingleton` on the target query; first frame and target switches snap under the default
+  policy; `ResetSmoothing()` / `CameraFollowBootstrap.ResetSmoothing(world)` for reconnect;
+  `Velocity`/`CurrentTarget` diagnostics; a destroyed target or supplied camera idles the system
+  with finite values. `Documentation~/CAMERA-FOLLOW.md`.
+- Tests: `CameraFollowMathTests` (Unity parity, MaxSpeed at extreme distance, zero/negative/NaN
+  dt, zero SmoothTime, force snap, teleport radius, no overshoot, 30/60/144 Hz, random deltas,
+  non-finite inputs); `CameraFollowBootstrapTests` extended with a real edit-mode camera
+  (supplied camera + first-frame snap, both multi-target policies, both switch policies,
+  teleport, reset, zero dt, destroyed target, destroyed camera, order after interpolation/sync).
 - Tests: `DotsModulesTests`, `SystemOrderVerifierTests`, `DotsViewBootstrapLifecycleTests`,
   `CameraFollowBootstrapTests`, `DotsSimulationBootstrapTests`, `ViewConfigValidatorTests`,
   `ViewConfigCatalogVersionTests`, extended `ArchetypeFactoryTests`; new
@@ -221,7 +237,9 @@ despawn per life of a replicated id**. Contract: `Documentation~/NETWORK-LIFECYC
   installed in, so no singleton points at the freed previous blob; `Dispose` removes the
   singleton from those worlds.
 - `CameraFollowSystem` reports (once) and skips when the number of `CameraFollowTarget` entities
-  is not exactly one, instead of throwing from `GetSingleton` every frame.
+  is not exactly one, instead of throwing from `GetSingleton` every frame. **`MaxSpeed` semantics
+  changed** from Unity's spring-distance clamp to a hard per-frame speed limit (see D09 above); a
+  camera tuned against the old behaviour may need a higher `MaxSpeed`.
 - `ViewOverlaySystem.OnDestroy` completes its dependency before disposing the overlay list and
   nulls the list on the buffer so disposal is observable.
 - `ArchetypeFactory.Create`/`CreateBatch` throw on a null preset or uncreated containers.

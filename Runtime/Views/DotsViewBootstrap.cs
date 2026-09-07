@@ -247,7 +247,7 @@ namespace Cuvara.DOTS.Views
                         // short-circuit leaves `key` unassigned on the false branch and
                         // the compiler rejects the later read (CS0165).
                         var known = false;
-                        var key = default(FixedString64Bytes);
+                        string key = null;
                         if (registry != null)
                         {
                             known = registry.TryGetKey(links[i].ViewId, out key);

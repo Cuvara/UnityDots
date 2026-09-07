@@ -74,7 +74,8 @@ Order your own systems against these groups, never against the internal systems.
 
 Every optional piece installs through a bootstrap with `Install`/`Uninstall` and a recorded
 owner scope — `MODULE-LIFECYCLE.md`. Configuration is validated at runtime and the catalog is
-versioned so a rebuild can never swap a view silently — `CONFIG-VALIDATION.md`.
+versioned so a rebuild can never swap a view silently — `CONFIG-VALIDATION.md`. Camera
+follow policies (no/multi target, switch, teleport, reconnect reset) — `CAMERA-FOLLOW.md`.
 
 ## Dependencies
 

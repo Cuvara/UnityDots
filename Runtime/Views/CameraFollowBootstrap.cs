@@ -76,7 +76,8 @@ namespace Cuvara.DOTS.Views
 
         /// <summary>
         /// Throws unless every field is finite and in range: <c>SmoothTime &gt;= 0</c>,
-        /// <c>MaxSpeed &gt; 0</c>, offsets finite.
+        /// <c>MaxSpeed &gt; 0</c>, <c>TeleportDistance &gt;= 0</c>, offsets finite. The camera
+        /// reference is not checked — null means <c>Camera.main</c> and is legal.
         /// </summary>
         public static void Validate(CameraFollowConfig config)
         {
@@ -92,6 +93,17 @@ namespace Cuvara.DOTS.Views
 
             RequireFinite(config.Offset, nameof(CameraFollowConfig.Offset));
             RequireFinite(config.LookAtOffset, nameof(CameraFollowConfig.LookAtOffset));
+            DotsModules.RequireAtLeast(config.TeleportDistance, 0f, ModuleName, nameof(CameraFollowConfig.TeleportDistance));
+        }
+
+        /// <summary>
+        /// Drops the follow system's spring state so its next update snaps to the target. For a
+        /// reconnect or a scene load that lands the player somewhere else. No-op when not installed.
+        /// </summary>
+        public static void ResetSmoothing(World world)
+        {
+            if (world == null || !world.IsCreated) return;
+            world.GetExistingSystemManaged<CameraFollowSystem>()?.ResetSmoothing();
         }
 
         /// <summary>
