@@ -58,6 +58,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     by design, being a service that outlives a scene, so the scene now takes the package default and
     tears down by named module instead of by scope. The physics scene's teardown is likewise named
     rather than a scope sweep, since the Default World is shared with the host.
+  - **The external-destruction step now sends a command after destroying the mirror.** Detection is
+    command-driven by design — the drain has no callback for an entity disappearing, so
+    `ApplySpawn` and `ApplyState` check `IsLiveMirror` when the next command for the id arrives, and
+    teardown checks it as well. The scene destroyed a mirror and then went quiet about that id, so
+    nothing ever reached a detection site and `ExternalDestruction` was never raised. It now sends
+    one more state for the id, which is also what a real server does, having no idea the client
+    destroyed anything. The package behaviour was correct and is unchanged.
   - **A scene that throws in `Start` now fails instead of hanging.** Setup is wrapped, the component
     disables itself rather than dereferencing nulls every frame, and under `-showcaseAutorun` it
     reports `[PhaseB] <Scene> step=start ... FAIL` plus `[PhaseB] <Scene>: 0 passed, 1 failed` and

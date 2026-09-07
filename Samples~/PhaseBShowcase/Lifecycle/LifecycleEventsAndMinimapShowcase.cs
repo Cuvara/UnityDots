@@ -379,8 +379,20 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             }
 
             _world.EntityManager.DestroyEntity(entity);
+
+            // Detection is command-driven, and that is the whole point of the reason. The drain has
+            // no callback on entity destruction; it notices the mirror is gone only when the next
+            // command for that id arrives - ApplySpawn and ApplyState both check IsLiveMirror - or
+            // at teardown. A real server has no idea the client destroyed anything and keeps
+            // sending state for the id, so the scene must keep talking about it too. Going quiet
+            // here is what made this step look like the reason never fires: with no further command
+            // there is simply nothing for the drain to notice.
+            var last = _positions[victim];
+            Wire.SetState(victim, last.x, last.y, 100, 100);
             _positions.Remove(victim);
-            _log.Add($"== destroyed the mirror entity of {victim} directly -> expect Despawned(ExternalDestruction)");
+
+            _log.Add($"== destroyed the mirror entity of {victim} directly, then sent one more state " +
+                     "for that id -> the drain reports Despawned(ExternalDestruction)");
         }
 
         // ---------------------------------------------------------------- camera
@@ -635,6 +647,16 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
 
         private bool Saw(string entry) => _events.Contains(entry);
 
+        /// <summary>
+        /// Waits for a condition, but never forever, so a semantic that stops holding fails the run
+        /// instead of hanging it.
+        /// </summary>
+        private static IEnumerator WaitUntilOrTimeout(Func<bool> condition, float timeoutSeconds)
+        {
+            var deadline = Time.realtimeSinceStartup + timeoutSeconds;
+            while (!condition() && Time.realtimeSinceStartup < deadline) yield return null;
+        }
+
         private int CountReason(NetworkDespawnReason reason)
         {
             var suffix = ":" + reason;
@@ -684,8 +706,10 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             run.CheckTrue("reconnect-generation-advanced", "generationAdvanced", _view.Generation > generationBefore);
             run.CheckAtLeast("reconnect-session-reset", "despawnsWithSessionReset", 1, CountReason(NetworkDespawnReason.SessionReset));
 
+            // Bounded wait rather than a fixed pause: the event is raised when the drain processes
+            // the follow-up state command, which is a world update away, not a wall-clock delay.
             ExternalDestroy();
-            yield return wait;
+            yield return WaitUntilOrTimeout(() => CountReason(NetworkDespawnReason.ExternalDestruction) > 0, 5f);
             run.CheckAtLeast("external-destroy", "despawnsWithExternalDestruction", 1, CountReason(NetworkDespawnReason.ExternalDestruction));
 
             Teardown();

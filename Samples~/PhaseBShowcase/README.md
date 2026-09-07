@@ -102,9 +102,16 @@ sequence, or step it by hand.
 | AOI exit `uuid-b` | the world stops listing the id | `Despawned(Despawned)` — not a death |
 | AOI re-entry `uuid-b` | `Spawn` again | `Spawned`, with a **new** `Entity` for the same id |
 | Reconnect + `BeginGeneration` | stamp a new generation, then the new session's keyframe | live mirrors despawn with `SessionReset`, and commands still queued from the old session are dropped rather than applied to the new one |
-| Destroy mirror entity | destroys the entity behind the adapter's back | `Despawned(ExternalDestruction)` — the one reason no wire message produces |
+| Destroy mirror entity | destroys the entity behind the adapter's back, then sends one more state for that id | `Despawned(ExternalDestruction)` — the one reason no wire message produces |
 | Teardown | `Uninstall(destroyMirrors: true)` | one `Despawned(Teardown)` per live id |
 | Reinstall adapter | fresh `DotsEntityView` + fresh subscriptions | after a teardown the old view still believes its ids are live, so it is replaced, not reused |
+
+**External destruction is detected on the next command, not on the destruction.** The drain has no
+callback for an entity disappearing; `ApplySpawn` and `ApplyState` both check `IsLiveMirror`, and
+teardown checks it too. So a scene that destroys a mirror and then goes quiet about that id will
+never see the reason fire — there is nothing for the drain to notice. This step therefore sends one
+more state for the id after destroying it, which is also what a real server does: it has no idea the
+client destroyed anything.
 
 `BeginGeneration` is called *before* anything is despawned, deliberately. Despawning every id
 first would leave nothing alive by the time the drain reached the reset, so the reset would have
