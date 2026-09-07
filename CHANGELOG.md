@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-09-07
+
 ### Added
 
 - **`Samples~/PhaseBShowcase` — four scenes for the D01–D14 improvement plan.** v0.28.0 shipped the
