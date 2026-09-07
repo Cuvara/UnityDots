@@ -193,6 +193,7 @@ DotsViewBootstrap.Install(world, registry);                       // Root by def
 DotsSimulationBootstrap.InstallSimulationSystems(world);          // Root by default
 CameraFollowBootstrap.Install(world, new CameraFollowConfig());   // Session; validates the config — Documentation~/CAMERA-FOLLOW.md
 PhysicsMovementBootstrap.Install(world);                          // Session; Runtime.Physics only
+PhysicsEventsBootstrap.Install(world);                            // Session; collision/trigger enter/stay/exit — Documentation~/PHYSICS.md
 
 DotsModules.UninstallScope(world, DotsModuleScope.Session);       // scene reload
 DotsModules.UninstallAll(world); world.Dispose();                 // permanent teardown

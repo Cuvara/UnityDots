@@ -134,7 +134,7 @@ namespace Cuvara.DOTS.Tests.Editor
         /// <summary>Declares the lifecycle subgroup; the test adds it to the parent instead.</summary>
         [DisableAutoCreation]
         [UpdateInGroup(typeof(ViewLifecycleGroup))]
-        private sealed class StrayLifecycleSystem : SystemBase
+        private sealed partial class StrayLifecycleSystem : SystemBase
         {
             protected override void OnUpdate() { }
         }

@@ -45,7 +45,10 @@ namespace Cuvara.DOTS.Simulation
         [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
-            _query = SystemAPI.QueryBuilder().WithAllRW<Unity.Transforms.LocalTransform>().WithAll<MoveToward>().Build();
+            // WithNone<PhysicsDrivenMovement>: a body Unity.Physics integrates must not also be moved
+            // here — see PhysicsDrivenMovement for the rule. The query is passed to the job explicitly
+            // so the exclusion applies to the iteration, not only to the count.
+            _query = SystemAPI.QueryBuilder().WithAllRW<Unity.Transforms.LocalTransform>().WithAll<MoveToward>().WithNone<PhysicsDrivenMovement>().Build();
             state.RequireForUpdate<MoveToward>();
         }
 
@@ -57,8 +60,8 @@ namespace Cuvara.DOTS.Simulation
             // package's entity count is AOI-bounded, so the common case is below it.
             var job = new MoveTowardJob { DeltaTime = SystemAPI.Time.DeltaTime };
             state.Dependency = _query.CalculateEntityCount() >= ParallelScheduling.MoveTowardMinimum
-                ? job.ScheduleParallel(state.Dependency)
-                : job.Schedule(state.Dependency);
+                ? job.ScheduleParallel(_query, state.Dependency)
+                : job.Schedule(_query, state.Dependency);
         }
     }
 }
