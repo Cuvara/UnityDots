@@ -266,16 +266,21 @@ platform table: `Documentation~/SUPPORT-MATRIX.md`.
 Tagging is manual and deliberate — `npm publish` cannot be undone.
 
 ```bash
-# 1. bump package.json, add the matching "## [X.Y.Z]" CHANGELOG section, merge to main
-# 2. wait for CI to be green on the commit you are about to tag
+# 1. bump package.json, rename "## [Unreleased]" to "## [X.Y.Z] - date" in CHANGELOG.md, merge to main
+# 2. wait for CI to be green on the commit you are about to tag (six Unity rows + validate)
 git tag vX.Y.Z && git push origin vX.Y.Z
 ```
 
 The tag triggers `release.yml`, which refuses to proceed unless `package.json` says exactly what the
 tag says, extracts the release notes from that CHANGELOG heading, creates the GitHub Release, and
 publishes `@cuvara/dots@X.Y.Z` to GitHub Packages. `release-reminder.yml` warns on every push to
-`main` while the version in `package.json` has no tag. Consumers adopt a release by updating the
-`#vX.Y.Z` in their manifest; never by editing `Library/PackageCache`.
+`main` while the version in `package.json` has no tag.
+
+Consumers adopt a release by bumping the `#vX.Y.Z` in `Packages/manifest.json` **and committing
+the re-resolved `packages-lock.json` with it** — a manifest-only bump is ignored by every other
+machine. Never edit `Library/PackageCache`; roll back by restoring the previous manifest + lock
+pair. The full process, the assembly-gate rules and the compatibility-evidence format are in
+`Documentation~/RELEASE.md`; what each CI row proves is in `Documentation~/SUPPORT-MATRIX.md §4`.
 
 ## Requirements
 

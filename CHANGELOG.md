@@ -317,6 +317,29 @@ despawn per life of a replicated id**. Contract: `Documentation~/NETWORK-LIFECYC
   when the catalog version changes.
 - `Documentation~/MODULE-LIFECYCLE.md`, `Documentation~/CONFIG-VALIDATION.md` (incl. the prefab
   replacement contract for providers).
+- **Verification matrix (D13).** CI grows from three Unity rows to six: **physics present**
+  (`com.unity.physics` 1.4.7; `Tests.Physics ≥ 35`), **full stack** (netcode v0.31.0 +
+  sgl-v0.3.0 + VContainer 1.16.9 + MessagePipe 1.8.1 + UniTask 2.5.10; `Cuvara.DOTS.DI` and the
+  new `Tests.DI ≥ 5` must be present) and **GameFoundation present** (UniT pooling/resources;
+  `Cuvara.DOTS.GameFoundation` must compile). Every row runs
+  `.github/scripts/inventory_assemblies.py`, which lists each package assembly as present/absent
+  against the row's expectation (log, step summary, `artifacts/assemblies.md`) — an absent
+  assembly is a stated fact in every row. `assert_test_floors.py` now names the test assemblies
+  absent from the results (compiled out by design vs. missing) and writes a step-summary table.
+  Existing rows assert `Tests.Physics == 0` / `Tests.DI == 0` where those packages are absent;
+  the Editor floor rises 30 → 100. `SUPPORT-MATRIX.md §4` mirrors the rows and states each test
+  assembly's mode (EditMode/PlayMode), gate and coverage; §5 states what an Android IL2CPP or
+  WebGL row would need and that neither exists.
+- **`Cuvara.DOTS.Tests.DI`** (new, gated on `CUVARA_DOTS_VCONTAINER`): `RegisterDotsViews`
+  resolution (registry, provisioner, cascade, publishers), root-scope ownership, scope disposal
+  uninstalls the view module, world-before-container disposal, no-world warning.
+- **`DotsViewsLifetime`** (`Runtime.DI`): registered by `RegisterDotsViews`; disposing the
+  VContainer scope now calls `DotsViewBootstrap.Uninstall` on the world it installed into.
+- **`Documentation~/RELEASE.md` (D14):** branch → PR → tag with `package.json` bumped in the
+  tagged commit; consumer bumps manifest **and** `packages-lock.json` together; clean-consumer
+  check; rollback = restore the known manifest + lock pair, never `Library/PackageCache`;
+  `.meta`/asmdef-gate/migration-note/changelog expectations; the compatibility-evidence record
+  format. README `Releasing` points at it.
 - **Physics integration (D07, `Runtime.Physics`).** `PhysicsEventCollectorSystem` reads
   Unity.Physics' collision and trigger streams (`ICollisionEventsJob`/`ITriggerEventsJob`,
   `CollisionEvent.CalculateDetails`) after `PhysicsSimulationGroup` and resolves them through
