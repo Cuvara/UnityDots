@@ -10,7 +10,6 @@ using Unity.Mathematics;
 using Unity.Physics;
 using Unity.Physics.Systems;
 using Unity.Transforms;
-using UnityEngine;
 using UnityEngine.TestTools;
 
 namespace Cuvara.DOTS.Tests.Physics
@@ -74,7 +73,7 @@ namespace Cuvara.DOTS.Tests.Physics
             _world.GetExistingSystemManaged<PhysicsSystemGroup>().Update();
         }
 
-        private Entity Body(float3 at, bool dynamic, Material? material = null, float radius = 0.5f)
+        private Entity Body(float3 at, bool dynamic, Unity.Physics.Material? material = null, float radius = 0.5f)
         {
             var entity = _world.EntityManager.CreateEntity();
             _world.EntityManager.AddComponentData(entity, LocalTransform.FromPosition(at));
@@ -86,7 +85,7 @@ namespace Cuvara.DOTS.Tests.Physics
         [Test]
         public void Install_WithoutAPipeline_WarnsByDefault_ThrowsWhenRequired()
         {
-            LogAssert.Expect(LogType.Warning, new System.Text.RegularExpressions.Regex("no PhysicsSimulationGroup"));
+            LogAssert.Expect(UnityEngine.LogType.Warning, new System.Text.RegularExpressions.Regex("no PhysicsSimulationGroup"));
             PhysicsEventsBootstrap.Install(_world);
             Assert.IsTrue(PhysicsEventsBootstrap.IsInstalled(_world));
 
