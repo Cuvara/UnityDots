@@ -73,7 +73,7 @@ namespace Cuvara.DOTS.Tests.Physics
             _world.GetExistingSystemManaged<PhysicsSystemGroup>().Update();
         }
 
-        private Entity Body(float3 at, bool dynamic, Unity.Physics.Material? material = null, float radius = 0.5f)
+        private Entity Body(float3 at, bool dynamic, Unity.Physics.Unity.Physics.Material? material = null, float radius = 0.5f)
         {
             var entity = _world.EntityManager.CreateEntity();
             _world.EntityManager.AddComponentData(entity, LocalTransform.FromPosition(at));
