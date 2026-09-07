@@ -31,6 +31,9 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
         /// <summary>Admission cap used for every key, so the rejection path is one click away.</summary>
         private const int MaxActivePerKey = 4;
 
+        /// <summary>Instances prewarmed per key, which is what gives each key a pool queue.</summary>
+        private const int WarmPerKey = 2;
+
         private static readonly string[] ChunkAKeys = { Cube, Sphere };
         private static readonly string[] ChunkBKeys = { Sphere, Capsule };
         private static readonly string[] ChunkCKeys = { Capsule };
@@ -59,7 +62,31 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
         // anything.
         private bool _chunkOperationInFlight;
 
+        /// <summary>False until Initialise has completed; every per-frame method checks it.</summary>
+        private bool _ready;
+
         private void Start()
+        {
+            try
+            {
+                Initialise();
+
+                // Not simply true: Initialise disables the component instead of throwing when
+                // the world or the UI document is missing, and that is not a ready scene.
+                _ready = enabled;
+            }
+            catch (Exception exception)
+            {
+                // A half-initialised bootstrap would otherwise NullReference every frame while the
+                // headless run hangs to its outer timeout. Stop the component and fail loudly.
+                Debug.LogException(exception);
+                enabled = false;
+                if (ShowcaseAutorun.Requested) ShowcaseAutorun.Abort("PoolAndChunks", exception);
+            }
+        }
+
+        /// <summary>Scene setup. Any throw here is caught by <see cref="Start"/>.</summary>
+        private void Initialise()
         {
             _templateRoot = new GameObject("Templates").transform;
             _templateRoot.SetParent(transform, false);
@@ -83,6 +110,14 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             {
                 _provider.RegisterPrefab(pair.Key, pair.Value);
                 _acquired[pair.Key] = new List<GameObject>();
+
+                // Prewarm is not optional here. A pool queue is only ever created by PrewarmAsync,
+                // and ReleaseInstance parks an instance only when a queue exists for its key -
+                // otherwise the instance is destroyed and its lease dropped. Without this the pool
+                // silently behaves like a plain factory: nothing is ever recycled, and a second
+                // release of the same instance is counted as a foreign release rather than a
+                // duplicate one, because the lease is already gone.
+                _ = _provider.PrewarmAsync(pair.Key, WarmPerKey);
             }
 
             // The chunk provisioner drives the pool through the decorator so "release while warming"
@@ -123,8 +158,8 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             ShowcaseUi.OnClick(root, "sweep-destroyed", SweepDestroyed);
             ShowcaseUi.OnClick(root, "hit-admission-cap", HitAdmissionCap);
 
-            ShowcaseUi.OnClick(root, "dispose-destroy", () => DisposePolicy(OutstandingLeasePolicy.Destroy));
-            ShowcaseUi.OnClick(root, "dispose-detach", () => DisposePolicy(OutstandingLeasePolicy.Detach));
+            ShowcaseUi.OnClick(root, "dispose-destroy", () => StartCoroutine(DisposePolicyRoutine(OutstandingLeasePolicy.Destroy, null)));
+            ShowcaseUi.OnClick(root, "dispose-detach", () => StartCoroutine(DisposePolicyRoutine(OutstandingLeasePolicy.Detach, null)));
 
             ShowcaseUi.OnClick(root, "warm-chunk-a", () => WarmChunk(ChunkA, ChunkAKeys));
             ShowcaseUi.OnClick(root, "warm-chunk-b", () => WarmChunk(ChunkB, ChunkBKeys));
@@ -136,7 +171,11 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             ShowcaseUi.OnClick(root, "reset-all", ResetAll);
         }
 
-        private void Update() => RenderCounters();
+        private void Update()
+        {
+            if (!_ready) return;
+            RenderCounters();
+        }
 
         // ---------------------------------------------------------------- pool
 
@@ -280,8 +319,8 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
         /// chosen policy. Destroy kills the instance; Detach leaves it alive and orphaned.
         /// Both policies log a warning naming the outstanding count — that warning is expected here.
         /// </summary>
-        /// <returns>Whether the outstanding instance was still alive after Dispose.</returns>
-        private bool DisposePolicy(OutstandingLeasePolicy policy)
+        /// <param name="onResult">Receives whether the outstanding instance was still alive.</param>
+        private IEnumerator DisposePolicyRoutine(OutstandingLeasePolicy policy, Action<bool> onResult)
         {
             var root = new GameObject($"DisposeDemo-{policy}").transform;
             root.SetParent(transform, false);
@@ -297,6 +336,12 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             var leased = provider.Acquire(Capsule, new Vector3(6f, 0.5f, 0f), Quaternion.identity, root);
             provider.Dispose();
 
+            // The verdict is only readable next frame. In a player the provider destroys through
+            // Object.Destroy, which defers to the end of the frame, so an instance the Destroy
+            // policy has just reclaimed still compares non-null right here - which would report
+            // both policies as "still alive" and make the two look identical.
+            yield return null;
+
             // Unity's overloaded equality reports a destroyed object as null.
             var stillAlive = leased != null;
             Log($"Dispose with {policy}: outstanding instance alive afterwards = {stillAlive}. " +
@@ -304,9 +349,10 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
                     ? "Detach forgets the lease and the holder now owns the object."
                     : "Destroy reclaims it."));
 
+            onResult?.Invoke(stillAlive);
+
             if (stillAlive) Destroy(leased);
             Destroy(root.gameObject, 0.1f);
-            return stillAlive;
         }
 
         // --------------------------------------------------------------- chunks
@@ -523,10 +569,14 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             run.Check("admission-cap-granted", "active(sphere)", MaxActivePerKey, _provider.GetActiveCount(Sphere));
             yield return wait;
 
-            run.Check("dispose-destroy", "instanceAliveAfterDispose", false, DisposePolicy(OutstandingLeasePolicy.Destroy));
+            var destroyedIsAlive = true;
+            yield return DisposePolicyRoutine(OutstandingLeasePolicy.Destroy, alive => destroyedIsAlive = alive);
+            run.Check("dispose-destroy", "instanceAliveAfterDispose", false, destroyedIsAlive);
             yield return wait;
 
-            run.Check("dispose-detach", "instanceAliveAfterDispose", true, DisposePolicy(OutstandingLeasePolicy.Detach));
+            var detachedIsAlive = false;
+            yield return DisposePolicyRoutine(OutstandingLeasePolicy.Detach, alive => detachedIsAlive = alive);
+            run.Check("dispose-detach", "instanceAliveAfterDispose", true, detachedIsAlive);
             yield return wait;
 
             ResetAll();

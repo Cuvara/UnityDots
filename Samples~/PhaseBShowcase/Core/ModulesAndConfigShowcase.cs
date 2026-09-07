@@ -47,7 +47,31 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
         private Label _stateLabel;
         private Label _reportLabel;
 
+        /// <summary>False until Initialise has completed; every per-frame method checks it.</summary>
+        private bool _ready;
+
         private void Start()
+        {
+            try
+            {
+                Initialise();
+
+                // Not simply true: Initialise disables the component instead of throwing when
+                // the world or the UI document is missing, and that is not a ready scene.
+                _ready = enabled;
+            }
+            catch (Exception exception)
+            {
+                // A half-initialised bootstrap would otherwise NullReference every frame while the
+                // headless run hangs to its outer timeout. Stop the component and fail loudly.
+                Debug.LogException(exception);
+                enabled = false;
+                if (ShowcaseAutorun.Requested) ShowcaseAutorun.Abort("ModulesAndConfig", exception);
+            }
+        }
+
+        /// <summary>Scene setup. Any throw here is caught by <see cref="Start"/>.</summary>
+        private void Initialise()
         {
             _worldA = new World("PhaseB Showcase A");
             _worldB = new World("PhaseB Showcase B");
@@ -117,7 +141,11 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             ShowcaseUi.OnClick(root, "check-ref", CheckRef);
         }
 
-        private void Update() => RenderState();
+        private void Update()
+        {
+            if (!_ready) return;
+            RenderState();
+        }
 
         // -------------------------------------------------------------- modules
 
@@ -395,25 +423,33 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             var wait = new WaitForSeconds(ShowcaseAutorun.StepDelay);
             yield return wait;
 
+            // The two worlds do not start level: Initialise gives world A the Simulation module and
+            // gives world B nothing, so A's count is not a valid expected value for B. Each world
+            // gets its own baseline, and Install adds exactly two modules to whichever it is given.
+            var baseA = DotsModules.Installed(_worldA).Count;
+            var baseB = DotsModules.Installed(_worldB).Count;
+            const int addedByInstall = 2; // Minimap + PhaseBDemo
+
             Install(_worldA, "A");
             run.CheckTrue("install-a", "installed(A,PhaseBDemo)", DotsModules.IsInstalled(_worldA, DemoModule));
             run.Check("install-a-count", "InstallCount(A,PhaseBDemo)", 1, DotsModules.InstallCount(_worldA, DemoModule));
-            var afterFirst = DotsModules.Installed(_worldA).Count;
+            run.Check("install-a-modules", "modules(A)", baseA + addedByInstall, DotsModules.Installed(_worldA).Count);
             yield return wait;
 
             // The point of clicking twice: idempotent by name, so the count of modules must not move.
             Install(_worldA, "A");
             run.Check("install-a-twice", "InstallCount(A,PhaseBDemo)", 2, DotsModules.InstallCount(_worldA, DemoModule));
-            run.Check("install-a-twice-modules", "modules(A)", afterFirst, DotsModules.Installed(_worldA).Count);
+            run.Check("install-a-twice-modules", "modules(A)", baseA + addedByInstall, DotsModules.Installed(_worldA).Count);
             yield return wait;
 
             Install(_worldB, "B");
-            run.Check("install-b", "modules(B)", afterFirst, DotsModules.Installed(_worldB).Count);
+            run.Check("install-b", "modules(B)", baseB + addedByInstall, DotsModules.Installed(_worldB).Count);
+            run.CheckTrue("install-b-minimap", "installed(B,Minimap)", MinimapBootstrap.IsInstalled(_worldB));
             yield return wait;
 
             Uninstall(_worldA, "A");
             run.Check("uninstall-a", "modules(A)", 0, DotsModules.Installed(_worldA).Count);
-            run.Check("uninstall-a-isolation", "modules(B)", afterFirst, DotsModules.Installed(_worldB).Count);
+            run.Check("uninstall-a-isolation", "modules(B)", baseB + addedByInstall, DotsModules.Installed(_worldB).Count);
             yield return wait;
 
             Uninstall(_worldA, "A");

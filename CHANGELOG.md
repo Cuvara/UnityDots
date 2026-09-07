@@ -44,6 +44,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Waits that depend on the physics pipeline are bounded, so a world that never steps fails the run
     instead of hanging it. Without the flag the scenes behave exactly as they do interactively, and
     neither mode needs a backend.
+  - **Fixes found by running the autorun headlessly**, all sample-side; no package change was
+    needed. The pool scene registered its prefabs but never prewarmed them — only `PrewarmAsync`
+    creates a key's pool queue, and `ReleaseInstance` parks an instance only when a queue exists for
+    its key, so every release destroyed the instance and dropped its lease; a second release of the
+    same instance was then counted as a *foreign* release rather than a duplicate one. The dispose
+    demo read its verdict on the same frame, but the provider destroys through `Object.Destroy`,
+    which a player defers to end of frame, so the `Destroy` policy looked identical to `Detach`; the
+    verdict is now read a frame later. The two-World scene compared world B's module count against
+    world A's, which is not a valid baseline because A also carries the Simulation module; each
+    world now has its own. The lifecycle scene asked for `Views` as `Session`-scoped, which throws
+    in the Default World whenever the host already installed it as `Root` — `Views` is `Root`-scoped
+    by design, being a service that outlives a scene, so the scene now takes the package default and
+    tears down by named module instead of by scope. The physics scene's teardown is likewise named
+    rather than a scope sweep, since the Default World is shared with the host.
+  - **A scene that throws in `Start` now fails instead of hanging.** Setup is wrapped, the component
+    disables itself rather than dereferencing nulls every frame, and under `-showcaseAutorun` it
+    reports `[PhaseB] <Scene> step=start ... FAIL` plus `[PhaseB] <Scene>: 0 passed, 1 failed` and
+    quits 1, so a broken scene fails fast in CI rather than running to the outer timeout.
   - Gating matches the runtime assemblies exactly: `…PhaseBShowcase.Netcode` carries the
     `com.cuvara.netcode` `versionDefine` with a `CUVARA_NETCODE` constraint and
     `…PhaseBShowcase.Physics` the `com.unity.physics` / `CUVARA_DOTS_PHYSICS` pair, so the sample

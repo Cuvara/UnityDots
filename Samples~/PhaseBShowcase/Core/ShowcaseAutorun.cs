@@ -118,6 +118,21 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             return Convert.ToString(value, CultureInfo.InvariantCulture) ?? "null";
         }
 
+        /// <summary>
+        /// Reports a scene that threw before it could assert anything, then quits with 1.
+        /// </summary>
+        /// <remarks>
+        /// Without this a bootstrap that throws in <c>Start</c> leaves the player running with a
+        /// half-built scene, so the headless run hangs until the outer CI timeout instead of
+        /// failing. A broken scene must fail fast and say so in the same greppable form.
+        /// </remarks>
+        public static void Abort(string scene, Exception exception)
+        {
+            var run = new ShowcaseAutorun(scene);
+            run.Fail("start", "sceneInitialised", $"{exception.GetType().Name}: {exception.Message}");
+            run.Finish();
+        }
+
         /// <summary>Logs the summary line and quits with 0 when everything passed, 1 otherwise.</summary>
         public void Finish()
         {

@@ -60,7 +60,31 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
         private Label _stateLabel;
         private readonly StringBuilder _state = new StringBuilder();
 
+        /// <summary>False until Initialise has completed; every per-frame method checks it.</summary>
+        private bool _ready;
+
         private void Start()
+        {
+            try
+            {
+                Initialise();
+
+                // Not simply true: Initialise disables the component instead of throwing when
+                // the world or the UI document is missing, and that is not a ready scene.
+                _ready = enabled;
+            }
+            catch (Exception exception)
+            {
+                // A half-initialised bootstrap would otherwise NullReference every frame while the
+                // headless run hangs to its outer timeout. Stop the component and fail loudly.
+                Debug.LogException(exception);
+                enabled = false;
+                if (ShowcaseAutorun.Requested) ShowcaseAutorun.Abort("PhysicsEvents", exception);
+            }
+        }
+
+        /// <summary>Scene setup. Any throw here is caught by <see cref="Start"/>.</summary>
+        private void Initialise()
         {
             _world = World.DefaultGameObjectInjectionWorld;
             if (_world == null)
@@ -109,10 +133,11 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
                 // Modules before the library: uninstalling stops the collector touching bodies, and
                 // the library frees blobs regardless of outstanding leases.
                 //
-                // Scope, not UninstallAll: this is the default world, and both modules this scene
-                // installs are Session-scoped. A blanket uninstall would tear down whatever else
-                // the project had installed here.
-                DotsModules.UninstallScope(_world, DotsModuleScope.Session);
+                // Named modules, not UninstallAll and not a scope sweep: this is the Default World
+                // and the host project shares it, so only what this scene installed comes down.
+                // Both are safe on a world that never had them, and safe twice.
+                PhysicsEventsBootstrap.Uninstall(_world);
+                PhysicsMovementBootstrap.Uninstall(_world);
             }
 
             _library?.Dispose();
@@ -381,6 +406,8 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
 
         private void LateUpdate()
         {
+            if (!_ready) return;
+
             DrainEvents();
             RenderState();
         }

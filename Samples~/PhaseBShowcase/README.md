@@ -56,6 +56,18 @@ The slow warm is real: `PooledViewAssetProvider.PrewarmAsync` completes synchron
 `DelayedViewAssetProvider` wraps it with an artificial delay to stand in for an Addressables-backed
 provider. Without it the release-while-warming case is unreachable from a button.
 
+**Prewarm is what creates a pool.** Only `PrewarmAsync` creates a key's pool queue, and
+`ReleaseInstance` parks an instance only when a queue exists for its key — otherwise the instance is
+destroyed and its lease dropped. A provider whose keys are registered but never prewarmed therefore
+behaves like a plain factory: nothing is recycled, and releasing the same instance twice is counted
+as a *foreign* release rather than a duplicate one, because the lease is already gone. The scene
+prewarms every key at start for exactly this reason.
+
+**Dispose reclaims on the next frame.** The provider destroys through `Object.Destroy`, which Unity
+defers to the end of the frame in a player, so an instance the `Destroy` policy has just reclaimed
+still compares non-null on the same frame. Both dispose buttons therefore report their verdict one
+frame later — read it sooner and the two policies look identical.
+
 ## 2. `Scenes/ModulesAndConfig.unity` — D04 / D05
 
 Two throwaway `World`s, created at `Start` and disposed at `OnDestroy`. The default world is never
@@ -162,7 +174,7 @@ and one summary line per scene, which is the line to assert on:
 
 ```
 [PhaseB] PoolAndChunks: 22 passed, 0 failed
-[PhaseB] ModulesAndConfig: 25 passed, 0 failed
+[PhaseB] ModulesAndConfig: 27 passed, 0 failed
 [PhaseB] LifecycleEventsAndMinimap: 16 passed, 0 failed
 [PhaseB] PhysicsEvents: 17 passed, 0 failed
 ```

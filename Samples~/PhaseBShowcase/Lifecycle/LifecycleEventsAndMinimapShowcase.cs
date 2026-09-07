@@ -64,7 +64,31 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
         private readonly StringBuilder _text = new StringBuilder();
         private Coroutine _autoplay;
 
+        /// <summary>False until Initialise has completed; every per-frame method checks it.</summary>
+        private bool _ready;
+
         private void Start()
+        {
+            try
+            {
+                Initialise();
+
+                // Not simply true: Initialise disables the component instead of throwing when
+                // the world or the UI document is missing, and that is not a ready scene.
+                _ready = enabled;
+            }
+            catch (Exception exception)
+            {
+                // A half-initialised bootstrap would otherwise NullReference every frame while the
+                // headless run hangs to its outer timeout. Stop the component and fail loudly.
+                Debug.LogException(exception);
+                enabled = false;
+                if (ShowcaseAutorun.Requested) ShowcaseAutorun.Abort("LifecycleEventsAndMinimap", exception);
+            }
+        }
+
+        /// <summary>Scene setup. Any throw here is caught by <see cref="Start"/>.</summary>
+        private void Initialise()
         {
             _world = World.DefaultGameObjectInjectionWorld;
             if (_world == null) { Debug.LogError("[PhaseBShowcase] No default world."); enabled = false; return; }
@@ -82,11 +106,12 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             _provider.RegisterPrefab("capsule", PrimitiveTemplates.Create("capsule", PrimitiveType.Capsule, new Color(0.25f, 0.6f, 0.9f), _templates));
             _provider.RegisterPrefab("cube", PrimitiveTemplates.Create("cube", PrimitiveType.Cube, new Color(0.85f, 0.35f, 0.25f), _templates));
             _registry = new EntityViewRegistry(_provider);
-            // Session, not the default Root scope: this scene runs in the default world, so its
-            // teardown must be scope-limited rather than a blanket UninstallAll, and that only
-            // reaches the Views module if it is registered in the same scope as Minimap and
-            // CameraFollow.
-            DotsViewBootstrap.Install(_world, _registry, DotsModuleScope.Session);
+            // The package's default scope, deliberately. Views is Root-scoped because it is a
+            // service that outlives a scene, and the Default World this scene runs in may already
+            // have it installed that way by the host project - asking for Session then throws
+            // "already installed as Root-scoped and cannot be re-installed as Session-scoped".
+            // Teardown below is targeted per module instead, which needs no scope agreement.
+            DotsViewBootstrap.Install(_world, _registry);
 
             BuildCatalog();
             // PooledViewAssetProvider.PrewarmAsync instantiates synchronously and hands back a
@@ -139,7 +164,14 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             if (_world != null && _world.IsCreated)
             {
                 DotsNetcodeBootstrap.Uninstall(_world, destroyMirrors: true);
-                DotsModules.UninstallScope(_world, DotsModuleScope.Session);
+
+                // Named modules, not UninstallAll and not a scope sweep. This is the Default World
+                // and the host project shares it: a blanket teardown would take its modules too,
+                // and a Session sweep would miss Root-scoped Views. Each Uninstall is safe on a
+                // world that never had the module, and safe twice.
+                CameraFollowBootstrap.Uninstall(_world);
+                MinimapBootstrap.Uninstall(_world);
+                DotsViewBootstrap.Uninstall(_world);
             }
 
             _catalog?.Dispose();
@@ -450,6 +482,8 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
 
         private void LateUpdate()
         {
+            if (!_ready) return;
+
             ApplyPendingSpawns();
             _plates.Sync(OverlayBuffer(), Camera.main, maxDistance: 80f);
             RenderMinimap();
