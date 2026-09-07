@@ -7,7 +7,6 @@ using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Physics;
 using Unity.Transforms;
-using UnityEngine;
 using UnityEngine.TestTools;
 
 namespace Cuvara.DOTS.Tests.Physics
@@ -137,7 +136,7 @@ namespace Cuvara.DOTS.Tests.Physics
             var filter = Assert.Throws<ArgumentException>(() => PhysicsBodyFactory.CreateCollider(ColliderShape.Sphere, new float3(1f), CollisionFilter.Zero));
             StringAssert.Contains("collide with nothing", filter.Message);
 
-            Assert.Throws<ArgumentException>(() => PhysicsBodyFactory.AddStaticBody(_em, entity, default(BlobAssetReference<Collider>)));
+            Assert.Throws<ArgumentException>(() => PhysicsBodyFactory.AddStaticBody(_em, entity, default(BlobAssetReference<Unity.Physics.Collider>)));
             Assert.IsFalse(_em.HasComponent<PhysicsCollider>(entity), "nothing half-added");
             Assert.AreEqual(0, _library.Count, "a rejected mass did not leak a lease");
         }
@@ -170,7 +169,7 @@ namespace Cuvara.DOTS.Tests.Physics
             _em.AddComponentData(body, new MoveData { Velocity = new float3(10f, 0f, 0f), BoundsMin = new float3(-100f), BoundsMax = new float3(100f) });
             _em.AddComponentData(body, new MoveToward { Target = new float3(50f, 0f, 0f), Speed = 10f, StopDistance = 0f });
             PhysicsBodyFactory.AddDynamicBody(_em, body, _library, ColliderShape.Sphere, new float3(0.5f));
-            LogAssert.Expect(LogType.Warning, new System.Text.RegularExpressions.Regex("no PhysicsSystemGroup"));
+            LogAssert.Expect(UnityEngine.LogType.Warning, new System.Text.RegularExpressions.Regex("no PhysicsSystemGroup"));
             PhysicsMovementBootstrap.Install(_world);
 
             _world.SetTime(new Unity.Core.TimeData(0.1, 0.1f));
@@ -184,7 +183,7 @@ namespace Cuvara.DOTS.Tests.Physics
         [Test]
         public void Bridge_IgnoresAnUntaggedVelocity()
         {
-            LogAssert.Expect(LogType.Warning, new System.Text.RegularExpressions.Regex("no PhysicsSystemGroup"));
+            LogAssert.Expect(UnityEngine.LogType.Warning, new System.Text.RegularExpressions.Regex("no PhysicsSystemGroup"));
             PhysicsMovementBootstrap.Install(_world);
             var entity = _em.CreateEntity();
             _em.AddComponentData(entity, new MoveData { Velocity = new float3(1f, 0f, 0f) });
