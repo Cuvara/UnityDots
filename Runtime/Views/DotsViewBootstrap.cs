@@ -243,7 +243,15 @@ namespace Cuvara.DOTS.Views
                     for (var i = 0; i < entities.Length; i++)
                     {
                         var entity = entities[i];
-                        var known = registry != null && registry.TryGetKey(links[i].ViewId, out var key);
+                        // Not `registry != null && TryGetKey(..., out var key)`: the
+                        // short-circuit leaves `key` unassigned on the false branch and
+                        // the compiler rejects the later read (CS0165).
+                        var known = false;
+                        var key = default(FixedString64Bytes);
+                        if (registry != null)
+                        {
+                            known = registry.TryGetKey(links[i].ViewId, out key);
+                        }
 
                         if (!entityManager.HasComponent<EntityViewRequest>(entity))
                         {
