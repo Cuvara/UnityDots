@@ -84,6 +84,7 @@ namespace Cuvara.DOTS.Netcode
         private readonly HashSet<string> _unresolvedArchetypes = new HashSet<string>();
 
         private readonly INetworkArchetypeResolver _resolver;
+        private readonly IMinimapCategoryResolver _minimap;
         private readonly ViewConfigCatalog _catalog;
         private readonly SnapshotSpaceMapping _mapping;
         private readonly bool _writeHealth;
@@ -113,15 +114,23 @@ namespace Cuvara.DOTS.Netcode
         /// container's instance when <c>Cuvara.DOTS.DI</c> registered one, so MessagePipe forwarding
         /// and direct subscribers see the same events.
         /// </param>
+        /// <param name="minimap">
+        /// Which replicated kinds appear on the minimap and as what category; the drain puts a
+        /// <c>MinimapMarker</c> on each mirror it says yes to. Null keeps every mirror off the map.
+        /// Because only mirrors are marked, the map can never show an entity the server did not
+        /// replicate. Rendering needs <c>MinimapBootstrap.Install</c> as well.
+        /// </param>
         public DotsEntityView(
             ViewConfigCatalog catalog,
             INetworkArchetypeResolver resolver,
             SnapshotSpaceMapping mapping = default,
             bool writeHealth = false,
-            NetworkEntityLifecycle lifecycle = null)
+            NetworkEntityLifecycle lifecycle = null,
+            IMinimapCategoryResolver minimap = null)
         {
             _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
             _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
+            _minimap = minimap;
             _mapping = mapping.IsPopulated ? mapping : SnapshotSpaceMapping.XZPlane;
             _writeHealth = writeHealth;
             Lifecycle = lifecycle ?? new NetworkEntityLifecycle();
@@ -179,6 +188,11 @@ namespace Cuvara.DOTS.Netcode
             var wireType = default(FixedString32Bytes);
             wireType.CopyFromTruncated(descriptor.Type);
 
+            // Resolved here, on the caller's thread, like the archetype: the drain must not call
+            // consumer code. -1 is "not on the map".
+            var minimapCategory = -1;
+            if (_minimap != null && _minimap.TryResolve(in descriptor, out var category)) minimapCategory = category;
+
             _commands.Enqueue(new NetworkViewCommand
             {
                 Kind = NetworkViewCommandKind.Spawn,
@@ -188,6 +202,7 @@ namespace Cuvara.DOTS.Netcode
                 ConfigIndex = index,
                 ConfigVersion = _catalog.Version,
                 ViewKey = key,
+                MinimapCategory = minimapCategory,
             });
         }
 

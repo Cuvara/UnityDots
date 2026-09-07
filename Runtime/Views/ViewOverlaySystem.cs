@@ -10,8 +10,16 @@ namespace Cuvara.DOTS.Views
     /// world-space health bars, name plates, and damage numbers.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Runs in <see cref="ViewTransformSyncGroup"/>, after transform sync — so the overlay
     /// positions reflect this frame's entity positions.
+    /// </para>
+    /// <para>
+    /// <b>Requires the registry singleton, not a non-empty query.</b> Until this change the system
+    /// also required at least one anchored entity, which meant that when the last one despawned the
+    /// system stopped updating and its final entries stayed in the buffer — a stale name plate over
+    /// an empty spot, for as long as the world lived. Now the buffer is cleared on that frame too.
+    /// </para>
     /// </remarks>
     [DisableAutoCreation]
     [UpdateInGroup(typeof(ViewTransformSyncGroup))]
@@ -26,7 +34,6 @@ namespace Cuvara.DOTS.Views
                 .WithAll<EntityViewLink, ViewOverlayAnchor>()
                 .Build(ref state);
 
-            state.RequireForUpdate(_anchored);
             state.RequireForUpdate<EntityViewRegistryReference>();
         }
 
@@ -47,8 +54,11 @@ namespace Cuvara.DOTS.Views
                 state.EntityManager.AddComponentData(entity, buffer);
             }
 
-            var count = _anchored.CalculateEntityCount();
             buffer.Entries.Clear();
+            buffer.Version++;
+
+            var count = _anchored.CalculateEntityCount();
+            if (count == 0) return;
             if (buffer.Entries.Capacity < count)
                 buffer.Entries.Capacity = count;
 

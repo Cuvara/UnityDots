@@ -12,9 +12,11 @@ installed it into a specific `World`.
 | Camera follow | `CameraFollowBootstrap.Install(world, config[, scope])` | Session | `CameraFollowConfig` singleton + `CameraFollowSystem` after `ViewTransformSyncGroup` | destroys the singleton and the system |
 | Physics movement (`Runtime.Physics`) | `PhysicsMovementBootstrap.Install(world[, scope, requirePhysicsPipeline])` | Session | `PhysicsMovementBridge` in `MovementSystemGroup` | destroys the bridge; groups stay |
 | View config catalog | `catalog.Build(...)` then `catalog.Install(world)` | Session | `ViewConfigTableReference` singleton | `catalog.Uninstall(world)` removes the singleton; `catalog.Dispose()` also frees the blob |
+| Minimap | `MinimapBootstrap.Install(world[, plane, capacity, scope])` | Session | `MinimapBuffer` singleton (owns a `NativeList<MinimapEntry>`) + `MinimapDataSystem` after `EntityViewTransformSyncSystem` | releases the list (idempotent with the system's `OnDestroy`), destroys the singleton and the system; `MinimapMarker`s stay |
 | Netcode adapter / prediction | `DotsNetcodeBootstrap` / `DotsPredictionBootstrap` | Session | see `NETCODE-INTEGRATION.md` | unchanged in this release; not yet recorded in `DotsModules` |
 
-Minimap has a buffer type but no producing system yet, so it has no module.
+Overlays are part of the Views module (`ViewOverlaySystem` is created by `DotsViewBootstrap`); the
+consumer contract for both feeds is `MINIMAP-OVERLAY.md`.
 
 ## Contract, one rule per line
 
@@ -75,7 +77,7 @@ different scope than it already has throws — one owner per module per world.
 | Singletons | removed | removed |
 | Managed views | recycled to the pool | recycled to the pool (by the uninstall, before disposal) |
 | Systems | Views: stay created, idle. Camera / simulation / physics: destroyed | all destroyed by the world |
-| Native containers | untouched — nothing native is owned by a module's singleton | released in each system's `OnDestroy`, after `CompleteDependency()` (`ViewOverlaySystem` owns the only one) |
+| Native containers | Views: untouched (the overlay list belongs to `ViewOverlaySystem`). Minimap: `Uninstall` releases its list | released in each system's `OnDestroy`, after `CompleteDependency()` (`ViewOverlaySystem`, `MinimapDataSystem`) |
 | Re-install | resumes; entities re-request their views | new world, new install |
 
 The order for permanent teardown matters and is the client's existing order: prediction, then

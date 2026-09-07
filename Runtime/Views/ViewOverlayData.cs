@@ -8,6 +8,13 @@ namespace Cuvara.DOTS.Views
     /// </summary>
     public struct ViewOverlayData
     {
+        /// <summary>
+        /// The anchored entity, including its version — the stable identity a consumer keys its UI
+        /// element by. <see cref="ViewId"/> changes when a view is recycled and re-acquired for the
+        /// same entity (a chunk release, an external destroy); this does not.
+        /// </summary>
+        public Unity.Entities.Entity Entity;
+
         /// <summary>View handle — matches <see cref="EntityViewLink.ViewId"/>.</summary>
         public int ViewId;
 

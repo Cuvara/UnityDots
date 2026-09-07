@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Minimap producer, overlay consumer contract, 2D sorting decision (D08)
+
+The three features `SUPPORT-MATRIX.md` classified as data-contract-only in 0.27.1, resolved.
+Contract document: `Documentation~/MINIMAP-OVERLAY.md`.
+
+- **Minimap is a module.** `MinimapMarker { Category, IsLocal }` is the per-entity opt-in;
+  `MinimapDataSystem` (internal, `ViewTransformSyncGroup` after the transform sync) rebuilds
+  `MinimapBuffer.Entries` every frame from every marked entity with a `LocalToWorld` — a view is not
+  required, so an entity whose key is still warming is on the map at its true position with
+  `ViewId = 0`. `MinimapEntry` now carries `Entity` (index + version) as the stable identity and
+  `Category` (was `EntityTypeIndex`); `MinimapBuffer` gains `Plane` (`MinimapPlane.XZ`/`XY`, chosen
+  at install to match the world's `SnapshotSpaceMapping`) and `Version`.
+  `MinimapBootstrap.Install(world, plane, capacity, scope)` (module `Minimap`, Session by default)
+  allocates the native list and creates the system; `Uninstall` completes the producer's dependency,
+  releases the list, destroys singleton and system; `MinimapDataSystem.OnDestroy` releases the list
+  if the world is disposed first. Both go through one idempotent `ReleaseEntries`.
+- **The map shows only what the server replicated.** Nothing in the package marks an entity on its
+  own. On the netcode path `DotsEntityView` takes an optional `IMinimapCategoryResolver`
+  (`TypeMinimapCategoryResolver` keyed on the wire kind with a local-player override) and the drain
+  marks the mirror at spawn. A mirror exists exactly while the server lists the id, so an entity the
+  area of interest omitted has no marker and no entry, and no host code can widen that through the
+  interface.
+- **No stale markers, either feed.** `MinimapDataSystem` requires only its buffer singleton, never a
+  non-empty query, so the frame the last marked entity disappears is the frame the buffer reads
+  zero. **`ViewOverlaySystem` had exactly the stale-entry bug this rule prevents:** it required at
+  least one anchored entity, stopped updating when the last one despawned, and left its final entries
+  in `ViewOverlayBuffer` for as long as the world lived. It now requires only the registry singleton,
+  clears on the empty frame and bumps a new `ViewOverlayBuffer.Version`.
+- **Overlay consumer contract, specified and implemented.** `ViewOverlayData` gains `Entity`.
+  `ViewOverlayProjection.Project(camera, world, maxDistance)` is the single world-to-screen rule:
+  the host owns the camera; behind-camera anchors are hidden, never mirrored; distance is measured
+  from the camera position and `≤ 0` disables the filter; off-screen-edge is still visible so plates
+  slide rather than pop; no camera reports `NoCamera`. `ViewOverlayReconciler<TElement>` over an
+  `IViewOverlayPresenter<TElement>` (Acquire / Place / Hide / Release, any UI type) keeps one element
+  per **entity** — not per `ViewId`, which changes when a view is recycled — acquires on first sight,
+  hides while behind/too far, releases the frame the entity leaves the buffer or the buffer is
+  released, and is gated on `Version` so calling it from `OnGUI` costs one comparison. `Runtime`
+  references no UI package.
+- **2D sorting stays unsupported, on purpose.** `ViewSortingKey` / `ViewConfig.Sorting*` remain
+  carried and unapplied: no consumer of the package renders sprites, a correct implementation needs a
+  per-view renderer lookup and a root/child/sorting-group decision only a real 2D prefab can answer,
+  and the value is a one-line write at spawn once one exists. Recorded in the component's remarks,
+  `SUPPORT-MATRIX.md`, `VIEW-PROVISIONING.md` and `MINIMAP-OVERLAY.md`.
+- **Sample.** `Samples~/HybridViews/HudOverlaysSample.cs` (add to the sample GameObject) anchors and
+  marks the sample's entities, installs the minimap module, and draws IMGUI labels through a
+  `ViewOverlayReconciler<Label>` plus a corner minimap with per-category colours; the header counts
+  acquires/releases so recycling is visible, and both feeds read zero after the last release step.
+- **Tests.** `Tests/Editor/MinimapModuleTests.cs` (19: install twice, uninstall twice, capacity
+  validation, reinstall, world disposal without uninstall, `UninstallAll` + dispose leaves no native
+  container, two worlds, scope conflict, spawn/move/despawn consistency, last-entity-gone clears
+  that frame, empty world, marker removed, XY plane, health fraction incl. zero max and clamp, growth
+  past capacity, independence from the view module, layout).
+  `Tests/Editor/ViewOverlayConsumerTests.cs` (13: producer spawn/move/despawn/empty incl. the stale
+  regression, view recycle keeps entity, projection in-front/behind/too-far/edge/no-camera,
+  reconciler acquire-once/place/release, version gating, hide-keeps-element, keyed by entity,
+  released buffer releases all, no camera). `Tests/Editor.Netcode/NetworkMinimapTests.cs` (4:
+  resolver marks only named kinds with category + locality, no resolver marks nothing, server
+  position + AOI exit removes the entry that frame, never-replicated cannot appear).
+  `ViewSystemGroupLayoutTests` roster gains `ViewOverlaySystem` and `MinimapDataSystem`.
+
+
 ### Changed
 
 - **`ChunkViewProvisioner` requires a cascade sink (breaking).** The `cascadeSink` constructor
