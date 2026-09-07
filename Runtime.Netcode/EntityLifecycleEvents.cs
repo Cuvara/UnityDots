@@ -28,8 +28,10 @@ namespace Cuvara.DOTS.Netcode
         /// Something other than the adapter destroyed the mirror entity — a consumer's own system,
         /// <c>HealthDeathSystem</c> with <c>writeHealth</c> on, or a manual <c>DestroyEntity</c>.
         /// Detected on the next command that targets the id, so the notification is late by up to
-        /// one snapshot interval, and <see cref="NetworkEntityDespawned.Entity"/> no longer exists
-        /// when it is published.
+        /// one snapshot interval. <see cref="NetworkEntityDespawned.Entity"/> is no longer a mirror
+        /// when it is published: either it does not exist, or it is a shell stripped to its cleanup
+        /// components (a destroyed view-linked entity survives that way until the presentation
+        /// group runs) — it has no <see cref="NetworkEntity"/> either way.
         /// </summary>
         ExternalDestruction = 1,
 
@@ -117,8 +119,9 @@ namespace Cuvara.DOTS.Netcode
     /// <b>For <see cref="NetworkDespawnReason.Despawned"/> and <see cref="NetworkDespawnReason.Teardown"/>
     /// the entity still exists while handlers run</b> and is destroyed immediately after the last
     /// handler returns — so a handler may read its last <c>LocalTransform</c> for a despawn effect.
-    /// For <see cref="NetworkDespawnReason.ExternalDestruction"/> it does not exist; check
-    /// <c>EntityManager.Exists</c> before touching components if a handler serves all three. Do not
+    /// For <see cref="NetworkDespawnReason.ExternalDestruction"/> it carries no adapter component
+    /// and may not exist at all; check <c>HasComponent&lt;NetworkEntity&gt;</c> before touching
+    /// components if a handler serves all three. Do not
     /// keep <see cref="Entity"/> past the handler for anything but identity comparison.
     /// </para>
     /// <para>

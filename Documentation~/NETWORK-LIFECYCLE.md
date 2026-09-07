@@ -51,12 +51,19 @@ All events are published **synchronously inside the drain**, on the thread that 
 | `Spawned` | after every adapter-owned component is on the entity and the drain's map records it | exists, complete, queryable by `NetworkEntity.Id` |
 | `Despawned(Despawned)` | when a wire `Despawn` is applied, **before** `DestroyEntity` | exists — last `LocalTransform`, `NetworkEntityState` readable; destroyed as soon as the last handler returns |
 | `Despawned(Teardown)` | from `DotsNetcodeBootstrap.Uninstall(world, destroyMirrors: true)`, before the destroy | exists, as above |
-| `Despawned(ExternalDestruction)` | on the next command for an id whose entity something else destroyed (a `State`, a `Despawn` is *not* needed), or during teardown | **does not exist**; check `EntityManager.Exists` in a handler that serves all reasons |
+| `Despawned(ExternalDestruction)` | on the next command for an id whose entity something else destroyed (a `State`, a `Despawn` is *not* needed), or during teardown | **not a mirror any more**: gone, or a shell stripped to cleanup components with no `NetworkEntity`; check `HasComponent<NetworkEntity>` in a handler that serves all reasons |
 
 The drain does no work while a handler runs, so the world a handler sees is exactly the world the
 drain left. `LocalToWorld` is seeded at spawn, so a spawn handler reading position gets the mapped
 origin (the first `State` has not been applied yet when a spawn is published, even if it is queued
 behind it — that is command order).
+
+**How "destroyed" is detected.** A mirror with a view carries `EntityViewLinkCleanup`, so
+`DestroyEntity` on it strips every other component and keeps the shell until
+`EntityViewDespawnSystem` (presentation) removes the cleanup. The drain runs in initialization, so it
+must not ask `Exists`; it asks `Exists && HasComponent<NetworkEntity>` — the component it added
+itself. A shell is treated as destroyed: a spawn for the id proceeds, a state for it is dropped and
+reported.
 
 ## Ordering
 
