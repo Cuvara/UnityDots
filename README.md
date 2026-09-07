@@ -17,7 +17,7 @@ sample-only / data-contract-only / planned, and records what CI actually tests.
 
 | Path | Assembly | Gate | Purpose | Status |
 |---|---|---|---|---|
-| `Runtime/` | `Cuvara.DOTS.Runtime` | none | View link + registry + systems, view config as data, provisioning seam and `PooledViewAssetProvider`, simulation systems, group tree, messaging seam, overlay anchors, camera follow, minimap types | core; see matrix per feature |
+| `Runtime/` | `Cuvara.DOTS.Runtime` | none | View link + registry + systems, view config as data, provisioning seam and `PooledViewAssetProvider`, simulation systems, group tree, module records, messaging seam, overlay feed + consumer helpers, minimap module, camera follow | core; see matrix per feature |
 | `Runtime.Netcode/` | `Cuvara.DOTS.Netcode` | `CUVARA_NETCODE` — `com.cuvara.netcode` **≥ 0.31.0** | `IEntityView` over ECS, remote interpolation, network lifecycle events | implemented, in client |
 | `Runtime.Netcode.Prediction/` | `Cuvara.DOTS.Netcode.Prediction` | `CUVARA_NETCODE` + `CUVARA_SHARED_GAMELOGIC` | Client-side prediction driver | implemented, in client |
 | `Runtime.GameLogic/` | `Cuvara.DOTS.GameLogic` | `CUVARA_SHARED_GAMELOGIC` | `ISimulationModel` over `Shared.GameLogic` | implemented, in client |
@@ -149,8 +149,9 @@ PresentationSystemGroup                       [Unity]
     │   └── EntityViewSpawnSystem             UpdateAfter(EntityViewDespawnSystem)
     └── ViewTransformSyncGroup                UpdateAfter(ViewLifecycleGroup)
         ├── EntityViewTransformSyncSystem
-        └── ViewOverlaySystem                 UpdateAfter(EntityViewTransformSyncSystem)
-    (CameraFollowSystem declares UpdateAfter(ViewTransformSyncGroup) but no bootstrap creates it)
+        ├── ViewOverlaySystem                 UpdateAfter(EntityViewTransformSyncSystem)
+        └── MinimapDataSystem                 UpdateAfter(EntityViewTransformSyncSystem); MinimapBootstrap
+    └── CameraFollowSystem                    UpdateAfter(ViewTransformSyncGroup); CameraFollowBootstrap
 
     ├── ViewTransformSyncGroup                UpdateAfter(ViewLifecycleGroup)
     │   ├── EntityViewTransformSyncSystem
@@ -309,6 +310,7 @@ Optional, resolved by your project:
 | `Documentation~/VIEW-PROVISIONING.md` | View lifecycle, `ViewConfig`, chunk provisioning, providers |
 | `Documentation~/NETCODE-INTEGRATION.md` | Adapter setup, components, interpolation, prediction |
 | `Documentation~/NETWORK-LIFECYCLE.md` | `NetworkEntitySpawned`/`Despawned` contract |
+| `Documentation~/MINIMAP-OVERLAY.md` | Minimap module, overlay consumer contract, 2D sorting decision |
 | `ROADMAP.md` | Done / in progress / planned, with classes |
 | `CHANGELOG.md` | Per-release detail |
 

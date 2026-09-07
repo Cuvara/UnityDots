@@ -114,6 +114,7 @@ namespace Cuvara.DOTS.Netcode
         private readonly HashSet<string> _unresolvedArchetypes = new HashSet<string>();
 
         private readonly INetworkArchetypeResolver _resolver;
+        private readonly IMinimapCategoryResolver _minimap;
         private readonly ViewConfigCatalog _catalog;
         private readonly SnapshotSpaceMapping _mapping;
         private readonly bool _writeHealth;
@@ -147,6 +148,12 @@ namespace Cuvara.DOTS.Netcode
         /// Pending-command count at which one warning per generation is logged. Diagnostics only —
         /// the queue is not bounded and nothing is dropped; see <see cref="NetworkIngestionMetrics"/>
         /// for why bounding waits on measurements. Non-positive disables the warning.
+
+        /// <param name="minimap">
+        /// Which replicated kinds appear on the minimap and as what category; the drain puts a
+        /// <c>MinimapMarker</c> on each mirror it says yes to. Null keeps every mirror off the map.
+        /// Because only mirrors are marked, the map can never show an entity the server did not
+        /// replicate. Rendering needs <c>MinimapBootstrap.Install</c> as well.
         /// </param>
         public DotsEntityView(
             ViewConfigCatalog catalog,
@@ -155,10 +162,13 @@ namespace Cuvara.DOTS.Netcode
             bool writeHealth = false,
             NetworkEntityLifecycle lifecycle = null,
             int backlogWarningThreshold = 4096)
+
+            IMinimapCategoryResolver minimap = null)
         {
             _backlogWarningThreshold = backlogWarningThreshold;
             _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
             _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
+            _minimap = minimap;
             _mapping = mapping.IsPopulated ? mapping : SnapshotSpaceMapping.XZPlane;
             _writeHealth = writeHealth;
             Lifecycle = lifecycle ?? new NetworkEntityLifecycle();
@@ -234,6 +244,13 @@ namespace Cuvara.DOTS.Netcode
             wireType.CopyFromTruncated(descriptor.Type);
 
             Enqueue(new NetworkViewCommand
+
+            // Resolved here, on the caller's thread, like the archetype: the drain must not call
+            // consumer code. -1 is "not on the map".
+            var minimapCategory = -1;
+            if (_minimap != null && _minimap.TryResolve(in descriptor, out var category)) minimapCategory = category;
+
+            _commands.Enqueue(new NetworkViewCommand
             {
                 Kind = NetworkViewCommandKind.Spawn,
                 Id = wireId,
@@ -242,6 +259,7 @@ namespace Cuvara.DOTS.Netcode
                 ConfigIndex = index,
                 ConfigVersion = _catalog.Version,
                 ViewKey = key,
+                MinimapCategory = minimapCategory,
             });
         }
 

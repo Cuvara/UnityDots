@@ -9,9 +9,14 @@ namespace Cuvara.DOTS.Views
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The buffer is rebuilt every frame — it is a snapshot, not an accumulator. The host reads
-    /// it after <see cref="Groups.ViewTransformSyncGroup"/> and before the next frame's
-    /// <c>SimulationSystemGroup</c>.
+    /// The buffer is rebuilt every frame the view module is installed — it is a snapshot, not an
+    /// accumulator, and it is rebuilt (to empty) on the frame the last anchored entity disappears,
+    /// so a consumer never sees a stale entry. The host reads it after
+    /// <see cref="Groups.ViewTransformSyncGroup"/> (<c>LateUpdate</c>) and before the next frame's
+    /// <c>InitializationSystemGroup</c>. The consumer contract — who projects to screen, what happens
+    /// behind the camera, distance filtering, cadence, UI recycling — is
+    /// <c>Documentation~/MINIMAP-OVERLAY.md</c>, with <see cref="ViewOverlayProjection"/> and
+    /// <see cref="ViewOverlayReconciler{TElement}"/> as the helpers that implement it.
     /// </para>
     /// <para>
     /// <b>Managed class, not a struct.</b> A blittable singleton would be ideal, but
@@ -26,6 +31,12 @@ namespace Cuvara.DOTS.Views
         /// until the next frame's collect phase clears it.
         /// </summary>
         public NativeList<ViewOverlayData> Entries;
+
+        /// <summary>
+        /// Incremented on every rebuild, including one that produced zero entries. Lets a consumer
+        /// tell "refreshed and empty" from "not refreshed".
+        /// </summary>
+        public uint Version;
 
         /// <summary>Number of entries this frame.</summary>
         public int Count => Entries.IsCreated ? Entries.Length : 0;

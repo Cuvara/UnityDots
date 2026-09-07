@@ -22,6 +22,7 @@ namespace Cuvara.DOTS.Views
         public NativeList<ViewOverlayData>.ParallelWriter Entries;
 
         private void Execute(
+            Entity entity,
             in EntityViewLink link,
             in LocalToWorld transform,
             in ViewOverlayAnchor anchor)
@@ -30,6 +31,7 @@ namespace Cuvara.DOTS.Views
 
             Entries.AddNoResize(new ViewOverlayData
             {
+                Entity = entity,
                 ViewId = link.ViewId,
                 WorldPosition = worldPos,
                 HealthFraction = -1f,

@@ -188,6 +188,13 @@ teardown, never "died". Subscribe on `view.Lifecycle`; `DotsNetcodeBootstrap.Uni
 destroyMirrors: true)` ends every remaining life at session end. Full contract, ordering and the
 scripted sequences: `NETWORK-LIFECYCLE.md`.
 
+## Minimap
+
+Pass an `IMinimapCategoryResolver` to `DotsEntityView` (`minimap:` argument) and the drain puts a
+`MinimapMarker` on every mirror the resolver says yes to; install `MinimapBootstrap` to collect them.
+Because only mirrors are marked, the map can show only entities the server replicated. See
+`MINIMAP-OVERLAY.md`.
+
 ## Important constraints
 
 1. **No interpolation arithmetic in this package.** All interpolation calls go

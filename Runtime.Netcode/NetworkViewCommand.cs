@@ -71,6 +71,12 @@ namespace Cuvara.DOTS.Netcode
         /// <summary>View key resolved at enqueue time. Empty when unconfigured.</summary>
         public FixedString64Bytes ViewKey;
 
+        /// <summary>
+        /// Minimap category resolved at enqueue time, or -1 when the entity is not on the map. Spawn
+        /// only. Negative rather than nullable so the struct stays blittable.
+        /// </summary>
+        public int MinimapCategory;
+
         public float X;
 
         public float Y;
