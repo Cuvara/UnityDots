@@ -112,6 +112,11 @@ despawn per life of a replicated id**. Contract: `Documentation~/NETWORK-LIFECYC
   behaviour byte for byte. `destroyMirrors: true` publishes one `Despawned(Teardown)` per id the
   drain still holds, destroys the mirror entities and empties the map; a `Despawn` still queued in the
   view is never applied afterwards, so there is no duplicate.
+- **"Destroyed" means `Exists && HasComponent<NetworkEntity>` is false, not `!Exists`.** A mirror
+  with a view carries `EntityViewLinkCleanup`, so an external `DestroyEntity` leaves a shell that
+  still `Exists` until presentation strips the cleanup; the drain runs before that and previously
+  mistook the shell for a live mirror (found by the lead's EditMode run of the two
+  external-destruction tests).
 - **The drain now recovers from an externally destroyed mirror on the next `Spawn` for that id**,
   closing the first life with `ExternalDestruction` before opening the second. Before, such a spawn
   was dropped and the id stayed invisible until it left and re-entered the area of interest.

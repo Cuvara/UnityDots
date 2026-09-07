@@ -175,7 +175,7 @@ namespace Cuvara.DOTS.Netcode
                 // entity: the view filters duplicates too, so reaching here means the two disagree,
                 // and destroying a live entity to build an identical one loses whatever a consumer
                 // attached to it. No event either — the id never stopped being present.
-                if (entityManager.Exists(existing.Entity)) return;
+                if (IsLiveMirror(entityManager, existing.Entity)) return;
 
                 // The mirror was destroyed behind the adapter's back and the wire is now spawning
                 // the id again (the view forgot it across an AOI exit/re-entry, or a session reset).
@@ -276,7 +276,7 @@ namespace Cuvara.DOTS.Netcode
             if (!_entities.TryGetValue(command.Id, out var mirror)) return;
 
             var entity = mirror.Entity;
-            if (!entityManager.Exists(entity))
+            if (!IsLiveMirror(entityManager, entity))
             {
                 // Destroyed by something other than a despawn command — a consumer's own system, or
                 // the death system when writeHealth is on. Drop the stale mapping so a later spawn
@@ -473,15 +473,34 @@ namespace Cuvara.DOTS.Netcode
 
             for (var i = 0; i < ids.Length; i++)
             {
-                var alive = entityManager.Exists(mirrors[i].Entity);
+                var alive = IsLiveMirror(entityManager, mirrors[i].Entity);
                 PublishDespawned(lifecycle, ids[i], mirrors[i],
                     alive ? NetworkDespawnReason.Teardown : NetworkDespawnReason.ExternalDestruction);
-                if (alive) entityManager.DestroyEntity(mirrors[i].Entity);
+                // Exists rather than alive: a mirror already stripped to its cleanup components is
+                // destroyed again harmlessly, and the view path finishes it next presentation.
+                if (entityManager.Exists(mirrors[i].Entity)) entityManager.DestroyEntity(mirrors[i].Entity);
             }
 
             ids.Dispose();
             mirrors.Dispose();
         }
+
+        /// <summary>
+        /// Whether a mapped entity is still a mirror, as opposed to destroyed or in cleanup limbo.
+        /// </summary>
+        /// <remarks>
+        /// <b><c>Exists</c> alone is the wrong test, and the reason is a cleanup component.</b> Every
+        /// mirror with a view carries <c>EntityViewLinkCleanup</c>, so <c>DestroyEntity</c> on it does
+        /// not remove the entity — Entities strips every non-cleanup component and keeps the shell
+        /// alive until <c>EntityViewDespawnSystem</c> removes the cleanup in presentation. The drain
+        /// runs in initialization, before that, so on the frame after an external destroy the
+        /// entity still <c>Exists</c> and has no <see cref="NetworkEntity"/>. That shell is not a
+        /// mirror: a state written to it would be lost with the entity, and a spawn refused because
+        /// of it would leave the id invisible. Asking for the component the drain itself added is
+        /// the honest question.
+        /// </remarks>
+        private static bool IsLiveMirror(EntityManager entityManager, Entity entity) =>
+            entityManager.Exists(entity) && entityManager.HasComponent<NetworkEntity>(entity);
 
         private static void PublishDespawned(
             NetworkEntityLifecycle lifecycle,
