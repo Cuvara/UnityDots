@@ -101,7 +101,11 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             {
                 // Modules before the library: uninstalling stops the collector touching bodies, and
                 // the library frees blobs regardless of outstanding leases.
-                DotsModules.UninstallAll(_world);
+                //
+                // Scope, not UninstallAll: this is the default world, and both modules this scene
+                // installs are Session-scoped. A blanket uninstall would tear down whatever else
+                // the project had installed here.
+                DotsModules.UninstallScope(_world, DotsModuleScope.Session);
             }
 
             _library?.Dispose();

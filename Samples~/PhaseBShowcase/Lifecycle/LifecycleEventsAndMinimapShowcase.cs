@@ -77,10 +77,23 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             _provider.RegisterPrefab("capsule", PrimitiveTemplates.Create("capsule", PrimitiveType.Capsule, new Color(0.25f, 0.6f, 0.9f), _templates));
             _provider.RegisterPrefab("cube", PrimitiveTemplates.Create("cube", PrimitiveType.Cube, new Color(0.85f, 0.35f, 0.25f), _templates));
             _registry = new EntityViewRegistry(_provider);
-            DotsViewBootstrap.Install(_world, _registry);
+            // Session, not the default Root scope: this scene runs in the default world, so its
+            // teardown must be scope-limited rather than a blanket UninstallAll, and that only
+            // reaches the Views module if it is registered in the same scope as Minimap and
+            // CameraFollow.
+            DotsViewBootstrap.Install(_world, _registry, DotsModuleScope.Session);
 
             BuildCatalog();
-            foreach (var pair in _catalog.PoolSizesByKey()) _provider.PrewarmAsync(pair.Key, pair.Value);
+            // PooledViewAssetProvider.PrewarmAsync instantiates synchronously and hands back a
+            // completed task, so discarding it loses nothing today; the continuation is still
+            // attached so a future provider that really does fault cannot fail in silence.
+            foreach (var pair in _catalog.PoolSizesByKey())
+            {
+                var key = pair.Key;
+                _ = _provider.PrewarmAsync(key, pair.Value).ContinueWith(
+                    task => Debug.LogError($"[PhaseBShowcase] Prewarm of '{key}' failed: {task.Exception}"),
+                    System.Threading.Tasks.TaskContinuationOptions.OnlyOnFaulted);
+            }
 
             MinimapBootstrap.Install(_world, MinimapPlane.XZ);
             _camera = new CameraFollowConfig { Camera = Camera.main, Offset = new float3(0f, 10f, -9f), SmoothTime = 0.25f, TeleportDistance = 15f };
@@ -119,7 +132,7 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             if (_world != null && _world.IsCreated)
             {
                 DotsNetcodeBootstrap.Uninstall(_world, destroyMirrors: true);
-                DotsModules.UninstallAll(_world);
+                DotsModules.UninstallScope(_world, DotsModuleScope.Session);
             }
 
             _catalog?.Dispose();

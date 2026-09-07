@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
-using System.Threading.Tasks;
 using Cuvara.DOTS.Provisioning;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -52,6 +51,12 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
         private Label _countersLabel;
 
         private int _placementCounter;
+
+        // The three chunk demos are async void and share one provider delay, so they must
+        // not overlap: a second click's finally would clear the delay the first is still
+        // relying on, and the release-while-warming demo would silently stop demonstrating
+        // anything.
+        private bool _chunkOperationInFlight;
 
         private void Start()
         {
@@ -304,16 +309,42 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
         private void OnChunkStateChanged(string chunkId, ChunkState state)
             => Log($"chunk '{chunkId}' -> {state}");
 
+        /// <summary>Refuses to start a second chunk operation while one is in flight.</summary>
+        private bool BeginChunkOperation(string what)
+        {
+            if (!_chunkOperationInFlight)
+            {
+                _chunkOperationInFlight = true;
+                return true;
+            }
+
+            Log($"'{what}' ignored: a chunk operation is already running.");
+            return false;
+        }
+
+        /// <summary>
+        /// True once the component has been destroyed, which an async continuation can reach after
+        /// OnDestroy has already disposed the provider.
+        /// </summary>
+        private bool Gone => this == null;
+
         private async void WarmChunk(string chunkId, string[] keys)
         {
+            if (!BeginChunkOperation("Warm " + chunkId)) return;
+
             try
             {
                 await _provisioner.PrewarmChunkAsync(chunkId, keys, countPerKey: 2);
+                if (Gone) return;
                 Log($"Warmed '{chunkId}' [{string.Join(", ", keys)}]. loaded={_provisioner.IsChunkLoaded(chunkId)}");
             }
             catch (Exception e)
             {
                 Log($"Warm of '{chunkId}' failed: {e.GetType().Name}: {e.Message}");
+            }
+            finally
+            {
+                _chunkOperationInFlight = false;
             }
         }
 
@@ -337,6 +368,8 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
         /// </summary>
         private async void ReleaseWhileWarming()
         {
+            if (!BeginChunkOperation("Release while warming")) return;
+
             _slowProvider.DelayMilliseconds = 1200;
             try
             {
@@ -347,6 +380,7 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
                 Log($"Released mid-warm: wasTracked={result.WasTracked} keysReleased={result.KeysReleased}.");
 
                 await warming;
+                if (Gone) return;
                 Log($"The slow warm finished. tracked('{ChunkC}')={_provisioner.IsChunkTracked(ChunkC)} — " +
                     "stale epoch, so the completion was ignored and no ChunkWarmed fired.");
             }
@@ -357,18 +391,23 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             finally
             {
                 _slowProvider.DelayMilliseconds = 0;
+                _chunkOperationInFlight = false;
             }
         }
 
         /// <summary>Warms and releases both chunks five times, then reports the baseline.</summary>
         private async void CycleChunks()
         {
+            if (!BeginChunkOperation("Cycle x5")) return;
+
             try
             {
                 for (var i = 0; i < 5; i++)
                 {
                     await _provisioner.PrewarmChunkAsync(ChunkA, ChunkAKeys, countPerKey: 2);
+                    if (Gone) return;
                     await _provisioner.PrewarmChunkAsync(ChunkB, ChunkBKeys, countPerKey: 2);
+                    if (Gone) return;
                     _provisioner.ReleaseChunk(ChunkA);
                     _provisioner.ReleaseChunk(ChunkB);
                 }
@@ -379,6 +418,10 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             catch (Exception e)
             {
                 Log($"Cycle failed: {e.GetType().Name}: {e.Message}");
+            }
+            finally
+            {
+                _chunkOperationInFlight = false;
             }
         }
 
