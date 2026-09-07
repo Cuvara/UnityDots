@@ -34,6 +34,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     aggregated contact counts, destruction mid-contact showing entity index reuse, install/uninstall
     cycles returning collider blobs and leases to zero, and the one-integrator guard tripped and
     restored.
+  - **Headless self-test.** `-showcaseAutorun` (with optional `-showcaseAutorunDelay <seconds>`,
+    default 1) makes each scene drive its own buttons in a scripted order, assert the outcomes its
+    README documents, and quit with 0 when every assertion held and 1 otherwise — a headless run
+    can build a scene and read its panel, but it cannot click, so the scenarios behind the buttons
+    were the part still unproven. Steps log
+    `[PhaseB] <Scene> step=<step> expected=<label>:<value> actual=<value> PASS|FAIL` and each scene
+    ends with `[PhaseB] <Scene>: N passed, M failed`; these strings are a CI contract and are fixed.
+    Waits that depend on the physics pipeline are bounded, so a world that never steps fails the run
+    instead of hanging it. Without the flag the scenes behave exactly as they do interactively, and
+    neither mode needs a backend.
   - Gating matches the runtime assemblies exactly: `…PhaseBShowcase.Netcode` carries the
     `com.cuvara.netcode` `versionDefine` with a `CUVARA_NETCODE` constraint and
     `…PhaseBShowcase.Physics` the `com.unity.physics` / `CUVARA_DOTS_PHYSICS` pair, so the sample

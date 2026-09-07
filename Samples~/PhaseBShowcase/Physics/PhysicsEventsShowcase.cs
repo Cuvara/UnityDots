@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Text;
 using Cuvara.DOTS.Modules;
@@ -51,6 +52,10 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
         private int _stayCount;
         private int _exitCount;
 
+        // Outcomes the log shows as text but the self-test needs as values.
+        private bool _sawDestroyedExit;
+        private bool _guardTripped;
+
         private ShowcaseUi.RollingLog _log;
         private Label _stateLabel;
         private readonly StringBuilder _state = new StringBuilder();
@@ -91,6 +96,8 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             InstallEvents();
             BuildStage();
             _log.Add("Ready. Drop a ball onto the box, or into the trigger zone.");
+
+            if (ShowcaseAutorun.Requested) StartCoroutine(Autorun());
         }
 
         private void OnDestroy()
@@ -358,6 +365,7 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             }
             catch (InvalidOperationException e)
             {
+                _guardTripped = true;
                 _log.Add("Guard tripped as intended: " + e.Message);
             }
             finally
@@ -393,6 +401,7 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             {
                 var collision = buffer.Collisions[i];
                 Count(collision.Phase);
+                if (collision.AnyEntityDestroyed) _sawDestroyedExit = true;
 
                 // The pair key is already canonical inside the event; recomputing it shows that
                 // A is the lower index and whether the caller's order had to be swapped.
@@ -407,6 +416,7 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             {
                 var trigger = buffer.Triggers[i];
                 Count(trigger.Phase);
+                if (trigger.AnyEntityDestroyed) _sawDestroyedExit = true;
                 _log.Add($"[{buffer.Step}] trigger {trigger.Phase} " +
                          $"A={Describe(trigger.EntityA)} B={Describe(trigger.EntityB)} " +
                          $"destroyed={trigger.AnyEntityDestroyed}");
@@ -442,6 +452,94 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             _state.Append($"\nbodies: balls={_balls.Count} ground={_ground != Entity.Null} zone={_zone != Entity.Null}\n");
 
             _stateLabel.text = _state.ToString();
+        }
+
+        // ------------------------------------------------------------- autorun
+
+        /// <summary>
+        /// Waits for a condition, but never forever: a world without a stepping physics pipeline
+        /// would otherwise hang the headless run instead of failing it.
+        /// </summary>
+        private static IEnumerator WaitUntilOrTimeout(Func<bool> condition, float timeoutSeconds)
+        {
+            var deadline = Time.realtimeSinceStartup + timeoutSeconds;
+            while (!condition() && Time.realtimeSinceStartup < deadline) yield return null;
+        }
+
+        private bool IntegratorOk(Entity entity)
+        {
+            try
+            {
+                PhysicsBodyValidation.AssertSingleIntegrator(_world.EntityManager, entity);
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Clicks this scene's buttons in order and asserts the outcomes the README promises.
+        /// </summary>
+        private IEnumerator Autorun()
+        {
+            var run = new ShowcaseAutorun("PhysicsEvents");
+            var wait = new WaitForSeconds(ShowcaseAutorun.StepDelay);
+            yield return wait;
+
+            run.CheckTrue("install-events", "PhysicsEvents installed", PhysicsEventsBootstrap.IsInstalled(_world));
+            run.CheckTrue("install-movement", "PhysicsMovement installed", PhysicsMovementBootstrap.IsInstalled(_world));
+
+            InstallEvents();
+            run.Check("install-twice", "InstallCount(PhysicsEvents)", 2, DotsModules.InstallCount(_world, PhysicsEventsBootstrap.ModuleName));
+            yield return wait;
+
+            var leasesAfterStage = _library.TotalLeases;
+            run.CheckAtLeast("build-stage", "colliderLeases", 2, leasesAfterStage);
+
+            DropBall(BallSpawn);
+            run.Check("drop-ball-lease", "colliderLeases", leasesAfterStage + 1, _library.TotalLeases);
+
+            // The ball falls about 5.5 m, so roughly a second of simulation before first contact.
+            yield return WaitUntilOrTimeout(() => _enterCount > 0, 10f);
+            run.CheckAtLeast("collision-enter", "enterPhases", 1, _enterCount);
+            yield return wait;
+
+            DestroyMidContact();
+            yield return WaitUntilOrTimeout(() => _sawDestroyedExit, 10f);
+            run.CheckTrue("destroy-mid-contact", "exitWithAnyEntityDestroyed", _sawDestroyedExit);
+            yield return wait;
+
+            ClearBodies();
+            run.Check("clear-bodies-leases", "colliderLeases", 0, _library.TotalLeases);
+            run.Check("clear-bodies-blobs", "colliderBlobs", 0, _library.Count);
+            yield return wait;
+
+            UninstallEvents();
+            run.Check("uninstall-scope", "PhysicsEvents installed", false, PhysicsEventsBootstrap.IsInstalled(_world));
+            yield return wait;
+
+            CycleModules();
+            run.Check("cycle-modules-blobs", "colliderBlobs", 0, _library.Count);
+            run.Check("cycle-modules-leases", "colliderLeases", 0, _library.TotalLeases);
+            run.CheckTrue("cycle-modules-reinstalled", "PhysicsEvents installed", PhysicsEventsBootstrap.IsInstalled(_world));
+            yield return wait;
+
+            SpawnPhysicsMover();
+            run.CheckTrue("physics-driven-mover", "singleIntegrator", IntegratorOk(_physicsMover));
+            yield return wait;
+
+            SpawnDirectMover();
+            run.CheckTrue("direct-mover", "singleIntegrator", IntegratorOk(_directMover));
+            yield return wait;
+
+            BreakGuard();
+            run.CheckTrue("break-guard", "guardRefusedDoubleIntegrator", _guardTripped);
+            run.CheckTrue("break-guard-restored", "singleIntegratorAfterRestore", IntegratorOk(_physicsMover));
+            yield return wait;
+
+            run.Finish();
         }
     }
 }

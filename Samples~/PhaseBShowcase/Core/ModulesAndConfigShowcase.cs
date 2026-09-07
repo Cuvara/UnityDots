@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Text;
 using Cuvara.DOTS.Configuration;
@@ -37,6 +38,10 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
         private ViewConfigRef _issuedRef;
         private bool _hasIssuedRef;
 
+        // Outcomes the panel shows as text but the self-test needs as values.
+        private bool _scopeConflictRefused;
+        private ViewConfigValidationReport _lastReport;
+
         private readonly StringBuilder _state = new StringBuilder();
         private ShowcaseUi.RollingLog _log;
         private Label _stateLabel;
@@ -55,6 +60,8 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
 
             BuildUi();
             Log("Two worlds created. Nothing installed yet.");
+
+            if (ShowcaseAutorun.Requested) StartCoroutine(Autorun());
         }
 
         private void OnDestroy()
@@ -148,6 +155,7 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
         {
             if (_worldA == null || !_worldA.IsCreated) return;
 
+            _scopeConflictRefused = false;
             try
             {
                 DotsModules.Register(_worldA, DemoModule, DotsModuleScope.Session, _ => { });
@@ -156,6 +164,7 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             }
             catch (InvalidOperationException e)
             {
+                _scopeConflictRefused = true;
                 Log("Refused re-install under a different scope: " + e.Message);
             }
         }
@@ -238,6 +247,7 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
         private void Validate(ViewArchetypeLibrary library, string label)
         {
             var report = ViewConfigValidator.ValidateLibrary(library, key => key != "ghost");
+            _lastReport = report;
 
             SetReport($"ViewConfigValidator.ValidateLibrary({library.name})\n" +
                       $"IsValid={report.IsValid}  (warnings do not invalidate)\n\n{report}");
@@ -372,6 +382,89 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             builder.Append($"  {DemoModule}: installed={DotsModules.IsInstalled(world, DemoModule)} " +
                            $"installCount={DotsModules.InstallCount(world, DemoModule)}\n");
             builder.Append($"  Minimap: installed={MinimapBootstrap.IsInstalled(world)}\n");
+        }
+
+        // ------------------------------------------------------------- autorun
+
+        /// <summary>
+        /// Clicks this scene's buttons in order and asserts the outcomes the README promises.
+        /// </summary>
+        private IEnumerator Autorun()
+        {
+            var run = new ShowcaseAutorun("ModulesAndConfig");
+            var wait = new WaitForSeconds(ShowcaseAutorun.StepDelay);
+            yield return wait;
+
+            Install(_worldA, "A");
+            run.CheckTrue("install-a", "installed(A,PhaseBDemo)", DotsModules.IsInstalled(_worldA, DemoModule));
+            run.Check("install-a-count", "InstallCount(A,PhaseBDemo)", 1, DotsModules.InstallCount(_worldA, DemoModule));
+            var afterFirst = DotsModules.Installed(_worldA).Count;
+            yield return wait;
+
+            // The point of clicking twice: idempotent by name, so the count of modules must not move.
+            Install(_worldA, "A");
+            run.Check("install-a-twice", "InstallCount(A,PhaseBDemo)", 2, DotsModules.InstallCount(_worldA, DemoModule));
+            run.Check("install-a-twice-modules", "modules(A)", afterFirst, DotsModules.Installed(_worldA).Count);
+            yield return wait;
+
+            Install(_worldB, "B");
+            run.Check("install-b", "modules(B)", afterFirst, DotsModules.Installed(_worldB).Count);
+            yield return wait;
+
+            Uninstall(_worldA, "A");
+            run.Check("uninstall-a", "modules(A)", 0, DotsModules.Installed(_worldA).Count);
+            run.Check("uninstall-a-isolation", "modules(B)", afterFirst, DotsModules.Installed(_worldB).Count);
+            yield return wait;
+
+            Uninstall(_worldA, "A");
+            run.Check("uninstall-a-twice", "modules(A)", 0, DotsModules.Installed(_worldA).Count);
+            yield return wait;
+
+            Uninstall(_worldB, "B");
+            run.Check("uninstall-b", "modules(B)", 0, DotsModules.Installed(_worldB).Count);
+            yield return wait;
+
+            ScopeConflict();
+            run.CheckTrue("scope-conflict", "refusedScopeChange", _scopeConflictRefused);
+            yield return wait;
+
+            VerifyOrder();
+            run.Check("verify-order", "violations", 0, SystemOrderVerifier.Verify(_worldA).Count);
+            yield return wait;
+
+            Validate(_validLibrary, "valid");
+            run.Check("validate-valid", "errors", 0, _lastReport.ErrorCount);
+            run.CheckTrue("validate-valid-isvalid", "IsValid", _lastReport.IsValid);
+            yield return wait;
+
+            Validate(_brokenLibrary, "broken");
+            run.CheckAtLeast("validate-broken", "errors", 5, _lastReport.ErrorCount);
+            run.CheckTrue("validate-broken-duplicate-name", "Has(DuplicateName)", _lastReport.Has(ViewConfigIssue.DuplicateName));
+            run.CheckTrue("validate-broken-empty-name", "Has(EmptyName)", _lastReport.Has(ViewConfigIssue.EmptyName));
+            run.CheckTrue("validate-broken-missing-config", "Has(MissingConfig)", _lastReport.Has(ViewConfigIssue.MissingConfig));
+            run.CheckTrue("validate-broken-empty-view-key", "Has(EmptyViewKey)", _lastReport.Has(ViewConfigIssue.EmptyViewKey));
+            run.CheckTrue("validate-broken-missing-prefab", "Has(MissingPrefab)", _lastReport.Has(ViewConfigIssue.MissingPrefab));
+            yield return wait;
+
+            BuildCatalog();
+            run.Check("build-catalog", "catalogVersion", 1, _catalog.Version);
+            yield return wait;
+
+            IssueRef();
+            run.CheckTrue("issue-ref", "hasRef", _hasIssuedRef);
+            run.Check("issue-ref-version", "refVersion", _catalog.Version, _issuedRef.Version);
+            yield return wait;
+
+            RebuildCatalog();
+            run.Check("rebuild-catalog", "catalogVersion", 2, _catalog.Version);
+            run.CheckTrue("rebuild-strands-ref", "refIsStale", _issuedRef.Version != _catalog.Version);
+            yield return wait;
+
+            // A ref built with `new` carries version 0, which no built table ever has.
+            run.Check("unstamped-ref-refused", "newRefVersion", 0, new ViewConfigRef { Index = 0 }.Version);
+            yield return wait;
+
+            run.Finish();
         }
     }
 }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Text;
 using Cuvara.DOTS.Provisioning;
@@ -92,7 +93,9 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             _provisioner.OnChunkStateChanged += OnChunkStateChanged;
 
             BuildUi();
-            Log("Ready. Pool caps: maxActivePerKey=" + MaxActivePerKey + ", maxPoolSize=6.");
+            Log($"Ready. Pool caps: maxActivePerKey={_provider.MaxActivePerKey}, maxPoolSize={_provider.MaxPoolSize}.");
+
+            if (ShowcaseAutorun.Requested) StartCoroutine(Autorun());
         }
 
         private void OnDestroy()
@@ -277,7 +280,8 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
         /// chosen policy. Destroy kills the instance; Detach leaves it alive and orphaned.
         /// Both policies log a warning naming the outstanding count — that warning is expected here.
         /// </summary>
-        private void DisposePolicy(OutstandingLeasePolicy policy)
+        /// <returns>Whether the outstanding instance was still alive after Dispose.</returns>
+        private bool DisposePolicy(OutstandingLeasePolicy policy)
         {
             var root = new GameObject($"DisposeDemo-{policy}").transform;
             root.SetParent(transform, false);
@@ -302,6 +306,7 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
 
             if (stillAlive) Destroy(leased);
             Destroy(root.gameObject, 0.1f);
+            return stillAlive;
         }
 
         // --------------------------------------------------------------- chunks
@@ -474,6 +479,93 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             }
 
             _countersLabel.text = _counters.ToString();
+        }
+
+        // ------------------------------------------------------------- autorun
+
+        /// <summary>
+        /// Clicks this scene's buttons in order and asserts the outcomes the README promises.
+        /// Ordering matters: the admission-cap step needs a key with free capacity, and the
+        /// shared-key steps need chunk A warmed before chunk B.
+        /// </summary>
+        private IEnumerator Autorun()
+        {
+            var run = new ShowcaseAutorun("PoolAndChunks");
+            var wait = new WaitForSeconds(ShowcaseAutorun.StepDelay);
+            yield return wait;
+
+            Acquire(Cube);
+            run.Check("acquire-cube", "active(cube)", 1, _provider.GetActiveCount(Cube));
+            yield return wait;
+
+            ReleaseLast(Cube);
+            run.Check("release-cube", "active(cube)", 0, _provider.GetActiveCount(Cube));
+            run.CheckAtLeast("release-cube-pooled", "pooled(cube)", 1, _provider.GetPooledCount(Cube));
+            yield return wait;
+
+            DuplicateRelease();
+            run.Check("duplicate-release", "DuplicateReleaseCount", 1, _provider.DuplicateReleaseCount);
+            yield return wait;
+
+            ForeignRelease();
+            run.Check("foreign-release", "ForeignReleaseCount", 1, _provider.ForeignReleaseCount);
+            yield return wait;
+
+            Acquire(Cube);
+            ExternalDestroy();
+            SweepDestroyed();
+            run.CheckAtLeast("external-destroy-sweep", "ExternallyDestroyedCount", 1, _provider.ExternallyDestroyedCount);
+            run.Check("external-destroy-reconciled", "active(cube)", 0, _provider.GetActiveCount(Cube));
+            yield return wait;
+
+            HitAdmissionCap();
+            run.Check("admission-cap", "AdmissionRejectedCount", 2, _provider.AdmissionRejectedCount);
+            run.Check("admission-cap-granted", "active(sphere)", MaxActivePerKey, _provider.GetActiveCount(Sphere));
+            yield return wait;
+
+            run.Check("dispose-destroy", "instanceAliveAfterDispose", false, DisposePolicy(OutstandingLeasePolicy.Destroy));
+            yield return wait;
+
+            run.Check("dispose-detach", "instanceAliveAfterDispose", true, DisposePolicy(OutstandingLeasePolicy.Detach));
+            yield return wait;
+
+            ResetAll();
+            run.Check("reset-all", "active", 0, _provider.ActiveCount);
+            yield return wait;
+
+            WarmChunk(ChunkA, ChunkAKeys);
+            yield return new WaitUntil(() => !_chunkOperationInFlight);
+            run.CheckTrue("warm-chunk-a", "loaded(chunk-a)", _provisioner.IsChunkLoaded(ChunkA));
+            run.Check("warm-chunk-a-refs", "refs(sphere)", 1, _provisioner.GetReferenceCount(Sphere));
+            yield return wait;
+
+            WarmChunk(ChunkB, ChunkBKeys);
+            yield return new WaitUntil(() => !_chunkOperationInFlight);
+            run.Check("warm-chunk-b-shared-key", "refs(sphere)", 2, _provisioner.GetReferenceCount(Sphere));
+            yield return wait;
+
+            ReleaseChunk(ChunkA);
+            run.Check("release-chunk-a-shared-key-survives", "refs(sphere)", 1, _provisioner.GetReferenceCount(Sphere));
+            run.CheckTrue("release-chunk-a-b-still-warm", "loaded(chunk-b)", _provisioner.IsChunkLoaded(ChunkB));
+            yield return wait;
+
+            ReleaseChunk(ChunkB);
+            run.Check("release-chunk-b", "refs(sphere)", 0, _provisioner.GetReferenceCount(Sphere));
+            run.Check("release-chunk-b-chunks", "chunks", 0, _provisioner.ChunkCount);
+            yield return wait;
+
+            ReleaseWhileWarming();
+            yield return new WaitUntil(() => !_chunkOperationInFlight);
+            run.Check("release-while-warming", "tracked(chunk-c)", false, _provisioner.IsChunkTracked(ChunkC));
+            yield return wait;
+
+            CycleChunks();
+            yield return new WaitUntil(() => !_chunkOperationInFlight);
+            run.Check("cycle-chunks", "chunks", 0, _provisioner.ChunkCount);
+            run.Check("cycle-chunks-keys", "trackedKeys", 0, _provisioner.TrackedKeyCount);
+            yield return wait;
+
+            run.Finish();
         }
     }
 }

@@ -89,10 +89,15 @@ sequence, or step it by hand.
 | Delta | `SetState` only | **none** — a delta must not churn lifecycle |
 | AOI exit `uuid-b` | the world stops listing the id | `Despawned(Despawned)` — not a death |
 | AOI re-entry `uuid-b` | `Spawn` again | `Spawned`, with a **new** `Entity` for the same id |
-| Reconnect + `BeginGeneration` | despawn all, stamp a new generation, new keyframe | `SessionReset`; commands queued from the old session are dropped rather than applied to the new one |
+| Reconnect + `BeginGeneration` | stamp a new generation, then the new session's keyframe | live mirrors despawn with `SessionReset`, and commands still queued from the old session are dropped rather than applied to the new one |
 | Destroy mirror entity | destroys the entity behind the adapter's back | `Despawned(ExternalDestruction)` — the one reason no wire message produces |
 | Teardown | `Uninstall(destroyMirrors: true)` | one `Despawned(Teardown)` per live id |
 | Reinstall adapter | fresh `DotsEntityView` + fresh subscriptions | after a teardown the old view still believes its ids are live, so it is replaced, not reused |
+
+`BeginGeneration` is called *before* anything is despawned, deliberately. Despawning every id
+first would leave nothing alive by the time the drain reached the reset, so the reset would have
+nothing to report and `SessionReset` would never appear — which is the one reason this step exists
+to show. A real reconnect has this shape anyway: the session is dropped, then a new keyframe arrives.
 
 Camera follow: **Follow local / Follow uuid-a** (switch), **No target** (the camera holds its last
 pose), **Two targets** (under `HoldAndReport` it refuses to pick; toggle to `FollowLowestIndex` to
@@ -127,6 +132,47 @@ installed with `requirePhysicsPipeline: true` so a missing pipeline throws inste
 
 Collider leases are returned by reading `PhysicsCollider` back off the entity before destroying it.
 The library counts leases; it does not watch entities, so skipping that leaks a blob.
+
+---
+
+## Headless self-test (`-showcaseAutorun`)
+
+A headless run can build a scene and see its panel, but it cannot click — so the scenarios behind
+the buttons, the part actually worth proving, would go unexercised. Every scene therefore drives its
+own buttons on demand.
+
+```bash
+<player> -batchmode -showcaseAutorun -showcaseAutorunDelay 1
+```
+
+- `-showcaseAutorun` runs the scene's buttons in a scripted order after start, asserts the outcomes
+  documented above, then quits: **exit code 0** if every assertion held, **1** otherwise.
+- `-showcaseAutorunDelay <seconds>` sets the pause between steps (default `1`). Parsed with the
+  invariant culture, so a build agent with a comma decimal separator still accepts `0.5`.
+- Without the flag nothing changes: the scenes behave exactly as they do interactively.
+- No backend, in either mode.
+
+The log lines are a CI contract — fixed and greppable. Per step:
+
+```
+[PhaseB] <Scene> step=<step> expected=<label>:<value> actual=<value> PASS|FAIL
+```
+
+and one summary line per scene, which is the line to assert on:
+
+```
+[PhaseB] PoolAndChunks: 22 passed, 0 failed
+[PhaseB] ModulesAndConfig: 25 passed, 0 failed
+[PhaseB] LifecycleEventsAndMinimap: 16 passed, 0 failed
+[PhaseB] PhysicsEvents: 17 passed, 0 failed
+```
+
+`<Scene>` is exactly the scene file name without its extension. Failing steps are logged through
+`Debug.LogError`, so the same line is still emitted — grep the line, not the log level. Do not
+reword these strings without updating whatever asserts on them.
+
+Waits that depend on the physics pipeline are bounded (10 s): a world that never steps fails the
+run rather than hanging it.
 
 ---
 

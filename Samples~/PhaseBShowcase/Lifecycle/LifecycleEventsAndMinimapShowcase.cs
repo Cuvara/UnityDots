@@ -46,6 +46,11 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
         private readonly List<IDisposable> _subscriptions = new List<IDisposable>();
         private readonly Dictionary<string, float2> _positions = new Dictionary<string, float2>();
         private readonly List<NetworkEntitySpawned> _pendingSpawns = new List<NetworkEntitySpawned>();
+
+        // Every lifecycle event this run has seen, as "spawn:<id>" / "despawn:<id>:<reason>".
+        // Kept across adapter reinstalls, so the self-test can assert on reasons raised by a
+        // view that has since been replaced.
+        private readonly List<string> _events = new List<string>();
         private bool _adapterInstalled;
 
         private ViewOverlayReconciler<Label> _plates;
@@ -122,6 +127,8 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             ShowcaseUi.OnClick(root, "clear-log", _log.Clear);
 
             _log.Add("ready — press Full snapshot, or Autoplay for the whole sequence");
+
+            if (ShowcaseAutorun.Requested) StartCoroutine(Autorun());
         }
 
         private void OnDestroy()
@@ -185,6 +192,7 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
             _subscriptions.Add(_view.Lifecycle.Subscribe((NetworkEntitySpawned e) =>
             {
                 _log.Add($"+ Spawned {e.EntityId} ({e.EntityType}{(e.IsLocal ? ", local" : "")}) {e.Entity}");
+                _events.Add($"spawn:{e.EntityId}");
 
                 // The event is raised from inside the drain system's update. Adding a component
                 // here would be a structural change mid-update, so the work is queued and applied
@@ -192,7 +200,10 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
                 _pendingSpawns.Add(e);
             }));
             _subscriptions.Add(_view.Lifecycle.Subscribe((NetworkEntityDespawned e) =>
-                _log.Add($"- Despawned {e.EntityId} reason {e.Reason} {e.Entity}")));
+            {
+                _log.Add($"- Despawned {e.EntityId} reason {e.Reason} {e.Entity}");
+                _events.Add($"despawn:{e.EntityId}:{e.Reason}");
+            }));
 
             DotsNetcodeBootstrap.Install(_world, _view);
             _adapterInstalled = true;
@@ -261,16 +272,17 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
         private void ReconnectReset()
         {
             if (!Ready()) return;
-            _log.Add("== reconnect: binder Reset (Despawn every id) then the new session's keyframe");
-            var keys = new List<string>(_positions.Keys);
-            foreach (var id in keys) Wire.Despawn(id);
-            _positions.Clear();
+            _log.Add("== reconnect: BeginGeneration drops the old session, then the new keyframe arrives");
 
-            // BeginGeneration is what makes a reconnect different from a mass despawn: it stamps a
-            // new generation, so any command still queued from the old session is dropped instead
-            // of being applied to the new one, and the drain reports SessionReset.
+            // BeginGeneration first, with no despawn loop before it. Despawning every id first would
+            // leave nothing alive by the time the drain reached the Reset, so the reset would have
+            // nothing to report and SessionReset would never appear - the one reason this step
+            // exists to show. A real reconnect is this shape anyway: the session is dropped, and a
+            // new keyframe arrives.
             var generation = _view.BeginGeneration();
-            _log.Add($"BeginGeneration() -> generation {generation}: stale commands are dropped, reason SessionReset");
+            _positions.Clear();
+            _log.Add($"BeginGeneration() -> generation {generation}: live mirrors despawn with SessionReset, " +
+                     "and any command still queued from the old session is dropped");
             FullSnapshot();
         }
 
@@ -583,6 +595,107 @@ namespace Cuvara.DOTS.Samples.PhaseBShowcase
                 label.RemoveFromHierarchy();
                 _pool.Push(label);
             }
+        }
+
+        // ------------------------------------------------------------- autorun
+
+        private bool Saw(string entry) => _events.Contains(entry);
+
+        private int CountReason(NetworkDespawnReason reason)
+        {
+            var suffix = ":" + reason;
+            var total = 0;
+            foreach (var entry in _events)
+            {
+                if (entry.StartsWith("despawn:", StringComparison.Ordinal) && entry.EndsWith(suffix, StringComparison.Ordinal)) total++;
+            }
+
+            return total;
+        }
+
+        /// <summary>
+        /// Drives the scripted wire sequence and asserts the lifecycle events it must produce.
+        /// Each step waits a full step delay so the drain system gets world updates to apply the
+        /// queued commands - the events are published by the drain, not by the Spawn call.
+        /// </summary>
+        private IEnumerator Autorun()
+        {
+            var run = new ShowcaseAutorun("LifecycleEventsAndMinimap");
+            var wait = new WaitForSeconds(ShowcaseAutorun.StepDelay);
+            yield return wait;
+
+            FullSnapshot();
+            yield return wait;
+            run.Check("full-snapshot", "spawnedIds", 4, _events.FindAll(e => e.StartsWith("spawn:", StringComparison.Ordinal)).Count);
+            run.Check("full-snapshot-mirrors", "mirrorEntities", 4, MirrorCount());
+
+            var beforeDelta = _events.Count;
+            Delta();
+            yield return wait;
+            run.Check("delta-raises-no-lifecycle-events", "eventsAfterDelta", beforeDelta, _events.Count);
+
+            var beforeExit = Mirror("uuid-b");
+            AoiExit("uuid-b");
+            yield return wait;
+            run.CheckTrue("aoi-exit", "despawn(uuid-b,Despawned)", Saw("despawn:uuid-b:Despawned"));
+
+            AoiReentry("uuid-b");
+            yield return wait;
+            var afterReentry = Mirror("uuid-b");
+            run.CheckTrue("aoi-reentry", "reentryMakesANewEntity", afterReentry != Entity.Null && afterReentry != beforeExit);
+
+            var generationBefore = _view.Generation;
+            ReconnectReset();
+            yield return wait;
+            run.CheckTrue("reconnect-generation-advanced", "generationAdvanced", _view.Generation > generationBefore);
+            run.CheckAtLeast("reconnect-session-reset", "despawnsWithSessionReset", 1, CountReason(NetworkDespawnReason.SessionReset));
+
+            ExternalDestroy();
+            yield return wait;
+            run.CheckAtLeast("external-destroy", "despawnsWithExternalDestruction", 1, CountReason(NetworkDespawnReason.ExternalDestruction));
+
+            Teardown();
+            yield return wait;
+            run.CheckAtLeast("teardown", "despawnsWithTeardown", 1, CountReason(NetworkDespawnReason.Teardown));
+            run.Check("teardown-mirrors-destroyed", "mirrorEntities", 0, MirrorCount());
+
+            InstallAdapter();
+            yield return wait;
+            FullSnapshot();
+            yield return wait;
+            run.Check("reinstall-adapter", "mirrorEntities", 4, MirrorCount());
+
+            Follow(Me);
+            yield return wait;
+            var follow = _world.GetExistingSystemManaged<CameraFollowSystem>();
+            run.CheckTrue("camera-follow-target", "hasTarget", follow != null && follow.CurrentTarget != Entity.Null);
+
+            FollowNothing();
+            yield return wait;
+            run.Check("camera-no-target", "taggedTargets", 0, TargetCount());
+
+            FollowTwo();
+            yield return wait;
+            run.Check("camera-two-targets", "taggedTargets", 2, TargetCount());
+
+            // Read on the same frame: the follow system runs every update and would have
+            // re-accumulated velocity by the time a step delay elapsed, so waiting first would
+            // assert on a number ResetSmoothing never promised to hold.
+            ResetSmoothing();
+            var velocityAfterReset = follow != null ? math.length(follow.Velocity) : 0f;
+            run.Check("camera-reset-smoothing", "velocityMagnitude", 0f, velocityAfterReset);
+            yield return wait;
+
+            var minimap = MinimapBootstrap.InstalledBuffer(_world);
+            run.CheckAtLeast("minimap-entries", "minimapEntries", 1, minimap?.Count ?? 0);
+
+            run.Finish();
+        }
+
+        private int TargetCount()
+        {
+            using var query = _world.EntityManager.CreateEntityQuery(ComponentType.ReadOnly<CameraFollowTarget>());
+            return query.CalculateEntityCount();
         }
     }
 }
