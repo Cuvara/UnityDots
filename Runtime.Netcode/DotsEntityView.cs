@@ -74,6 +74,13 @@ namespace Cuvara.DOTS.Netcode
         private readonly ConcurrentQueue<NetworkViewCommand> _commands = new ConcurrentQueue<NetworkViewCommand>();
         private readonly HashSet<string> _live = new HashSet<string>();
         private readonly Dictionary<string, int> _configIndexById = new Dictionary<string, int>();
+
+        /// <summary>
+        /// Catalog version the cached indices were resolved against. A rebuild bumps the catalog's
+        /// version and the cache is dropped on the next resolve, so a stale index is never used to
+        /// read a key out of the new table.
+        /// </summary>
+        private int _configIndexVersion;
         private readonly HashSet<string> _unresolvedArchetypes = new HashSet<string>();
 
         private readonly INetworkArchetypeResolver _resolver;
@@ -179,6 +186,7 @@ namespace Cuvara.DOTS.Netcode
                 Type = wireType,
                 IsLocal = isLocal,
                 ConfigIndex = index,
+                ConfigVersion = _catalog.Version,
                 ViewKey = key,
             });
         }
@@ -301,6 +309,12 @@ namespace Cuvara.DOTS.Netcode
         {
             index = -1;
             key = default;
+
+            if (_configIndexVersion != _catalog.Version)
+            {
+                _configIndexById.Clear();
+                _configIndexVersion = _catalog.Version;
+            }
 
             if (_configIndexById.TryGetValue(entity.Id, out index))
             {

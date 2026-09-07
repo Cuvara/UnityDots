@@ -19,8 +19,18 @@ namespace Cuvara.DOTS.Configuration
         /// <param name="preset">The archetype definition.</param>
         /// <param name="position">Initial world position.</param>
         /// <returns>The created entity.</returns>
+        /// <exception cref="System.ArgumentNullException"><paramref name="preset"/> is null.</exception>
+        /// <remarks>
+        /// Does not validate the preset's values — that is <see cref="ViewConfigValidator.ValidatePreset"/>,
+        /// run once when the preset is loaded rather than per entity. A view request is added whenever
+        /// the preset names a key; whether the view layer is installed in the world is not this
+        /// method's concern, and an entity created in a world with no views simply carries a request
+        /// nothing consumes.
+        /// </remarks>
         public static Entity Create(EntityManager em, EntityArchetypePreset preset, float3 position = default)
         {
+            if (preset == null) throw new System.ArgumentNullException(nameof(preset));
+
             var entity = em.CreateEntity();
 
             // Transform — always present
@@ -85,6 +95,10 @@ namespace Cuvara.DOTS.Configuration
         public static void CreateBatch(EntityManager em, EntityArchetypePreset preset,
             NativeArray<float3> positions, NativeList<Entity> output)
         {
+            if (preset == null) throw new System.ArgumentNullException(nameof(preset));
+            if (!positions.IsCreated) throw new System.ArgumentException("positions must be a created NativeArray", nameof(positions));
+            if (!output.IsCreated) throw new System.ArgumentException("output must be a created NativeList", nameof(output));
+
             for (int i = 0; i < positions.Length; i++)
             {
                 output.Add(Create(em, preset, positions[i]));

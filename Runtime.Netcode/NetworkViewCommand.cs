@@ -41,6 +41,13 @@ namespace Cuvara.DOTS.Netcode
         /// <summary>Config table index resolved at enqueue time, or -1 when the entity has no config.</summary>
         public int ConfigIndex;
 
+        /// <summary>
+        /// <see cref="Cuvara.DOTS.Configuration.ViewConfigCatalog.Version"/> the index was resolved
+        /// against, carried onto the entity's <c>ViewConfigRef</c> so a rebuild between enqueue and
+        /// drain is refused rather than resolved to the wrong record.
+        /// </summary>
+        public int ConfigVersion;
+
         /// <summary>View key resolved at enqueue time. Empty when unconfigured.</summary>
         public FixedString64Bytes ViewKey;
 
