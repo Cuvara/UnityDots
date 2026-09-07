@@ -11,6 +11,9 @@ using Unity.Entities;
 using UnityEngine;
 using UnityEngine.TestTools;
 using VContainer;
+#if CUVARA_DOTS_MESSAGEPIPE
+using MessagePipe;
+#endif
 
 namespace Cuvara.DOTS.Tests.DI
 {
@@ -54,9 +57,25 @@ namespace Cuvara.DOTS.Tests.DI
             }
         }
 
-        private IObjectResolver Build(World world)
+        /// <param name="brokers">
+        /// Register MessagePipe brokers for the package's messages, the way the client's
+        /// <c>RegisterDots</c> does. Compiled out when MessagePipe is absent — the publishers are
+        /// then the no-op ones regardless.
+        /// </param>
+        private IObjectResolver Build(World world, bool brokers = true)
         {
             var builder = new ContainerBuilder();
+#if CUVARA_DOTS_MESSAGEPIPE
+            if (brokers)
+            {
+                var options = builder.RegisterMessagePipe();
+                builder.RegisterMessageBroker<ViewSpawned>(options);
+                builder.RegisterMessageBroker<ViewDespawned>(options);
+                builder.RegisterMessageBroker<ChunkWarmed>(options);
+                builder.RegisterMessageBroker<ChunkReleased>(options);
+                builder.RegisterMessageBroker<ChunkCascadeReleased>(options);
+            }
+#endif
             builder.RegisterInstance<IViewAssetProvider>(_provider);
             builder.RegisterDotsViews(null, world);
             return builder.Build();
@@ -98,11 +117,27 @@ namespace Cuvara.DOTS.Tests.DI
             Assert.IsNotNull(container.Resolve<IDotsPublisher<ChunkWarmed>>());
             Assert.IsNotNull(container.Resolve<IDotsPublisher<ChunkReleased>>());
             Assert.IsNotNull(container.Resolve<IDotsPublisher<ChunkCascadeReleased>>());
-#if !CUVARA_DOTS_MESSAGEPIPE
+#if CUVARA_DOTS_MESSAGEPIPE
+            Assert.AreNotSame(NullDotsPublisher<ViewSpawned>.Instance, spawned, "with MessagePipe and a broker the publisher forwards");
+#else
             Assert.AreSame(NullDotsPublisher<ViewSpawned>.Instance, spawned, "without MessagePipe the publishers are the no-op ones");
 #endif
             Assert.DoesNotThrow(() => spawned.Publish(new ViewSpawned(1, "goblin")));
         }
+
+#if CUVARA_DOTS_MESSAGEPIPE
+        [Test]
+        public void MessagePipePresent_ButNoBroker_FallsBackToTheNullPublisher_WithOneWarningPerType()
+        {
+            LogAssert.Expect(LogType.Warning, new System.Text.RegularExpressions.Regex("no IPublisher<ViewSpawned>"));
+            using var container = Build(_world, brokers: false);
+
+            var spawned = container.Resolve<IDotsPublisher<ViewSpawned>>();
+            Assert.AreSame(NullDotsPublisher<ViewSpawned>.Instance, spawned, "a missing broker is a dropped message, not a failed container build");
+            Assert.AreSame(spawned, container.Resolve<IDotsPublisher<ViewSpawned>>(), "resolved once — one warning, not one per resolve");
+            Assert.IsTrue(DotsViewBootstrap.IsInstalled(_world), "the view module still installed");
+        }
+#endif
 
         [Test]
         public void DisposingTheContainer_UninstallsTheViews_AndRecyclesThem()

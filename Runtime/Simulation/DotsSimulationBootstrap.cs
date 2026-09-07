@@ -49,6 +49,9 @@ namespace Cuvara.DOTS.Simulation
             var lifecycle = world.GetOrCreateSystemManaged<LifecycleSystemGroup>();
             var commandBuffer = world.GetOrCreateSystemManaged<DotsEndSimulationCommandBufferSystem>();
 
+            // Same reason as in DotsViewBootstrap.InstallSystems: GameplaySystemGroup's
+            // [UpdateBefore(TransformSystemGroup)] needs the target to exist to be applied.
+            simulation.AddSystemToUpdateList(world.GetOrCreateSystemManaged<Unity.Transforms.TransformSystemGroup>());
             simulation.AddSystemToUpdateList(gameplay);
             gameplay.AddSystemToUpdateList(movement);
             gameplay.AddSystemToUpdateList(lifecycle);

@@ -7,6 +7,8 @@
         "Cuvara.DOTS.Runtime",
         "Cuvara.DOTS.DI",
         "VContainer",
+        "MessagePipe",
+        "MessagePipe.VContainer",
         "Unity.Entities",
         "Unity.Burst",
         "Unity.Collections",

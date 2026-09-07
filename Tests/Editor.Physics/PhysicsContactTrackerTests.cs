@@ -15,9 +15,19 @@ namespace Cuvara.DOTS.Tests.Physics
     {
         private static Entity E(int index, int version = 1) => new Entity { Index = index, Version = version };
 
-        private readonly PhysicsContactTracker _tracker = new PhysicsContactTracker();
-        private readonly List<EntityCollision> _collisions = new List<EntityCollision>();
-        private readonly List<EntityTriggerEvent> _triggers = new List<EntityTriggerEvent>();
+        // NUnit reuses one fixture instance for every test in the class, so these are rebuilt per
+        // test: a tracker left mid-step by one test would fail the next with "BeginStep called twice".
+        private PhysicsContactTracker _tracker;
+        private List<EntityCollision> _collisions;
+        private List<EntityTriggerEvent> _triggers;
+
+        [SetUp]
+        public void SetUp()
+        {
+            _tracker = new PhysicsContactTracker();
+            _collisions = new List<EntityCollision>();
+            _triggers = new List<EntityTriggerEvent>();
+        }
 
         private void Step(params (Entity a, Entity b)[] contacts)
         {

@@ -399,6 +399,17 @@ despawn per life of a replicated id**. Contract: `Documentation~/NETWORK-LIFECYC
 - **`ViewConfigCatalog.Build`** re-publishes the new blob into every world the catalog is
   installed in, so no singleton points at the freed previous blob; `Dispose` removes the
   singleton from those worlds.
+- **`RegisterDotsMessaging` with MessagePipe installed but no broker registered** for a package
+  message now resolves the no-op publisher and warns once per type, instead of failing the
+  container build with `No such registration of type: IPublisher<T>`. Subscribers still require
+  the broker.
+- Every bootstrap that installs into `SimulationSystemGroup` (`DotsViewBootstrap.InstallSystems`,
+  `DotsSimulationBootstrap`, `PhysicsMovementBootstrap`) now creates `TransformSystemGroup` there
+  when it is absent, so `GameplaySystemGroup`'s `[UpdateBefore(TransformSystemGroup)]` is applied
+  in hand-built worlds instead of being dropped with a warning.
+- `CameraFollowBootstrap.InstallSystems` installs the full view group tree
+  (`DotsViewBootstrap.InstallSystems`) rather than only the two groups the camera orders against;
+  a partial tree made Entities drop `ViewTransformSyncGroup`'s ordering with a warning.
 - `CameraFollowSystem` reports (once) and skips when the number of `CameraFollowTarget` entities
   is not exactly one, instead of throwing from `GetSingleton` every frame. **`MaxSpeed` semantics
   changed** from Unity's spring-distance clamp to a hard per-frame speed limit (see D09 above); a
