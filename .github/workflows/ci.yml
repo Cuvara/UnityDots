@@ -221,7 +221,7 @@ jobs:
       - name: Inventory compiled assemblies
         if: always()
         run: |
-          mkdir -p artifacts
+          mkdir -p artifacts && sudo chmod -R a+rwX artifacts
           python3 package/.github/scripts/inventory_assemblies.py Library/ScriptAssemblies artifacts/assemblies.md \
             Cuvara.DOTS.Runtime=present Cuvara.DOTS.GameLogic=present Cuvara.DOTS.Netcode=absent Cuvara.DOTS.Netcode.Prediction=absent Cuvara.DOTS.Physics=absent Cuvara.DOTS.DI=absent Cuvara.DOTS.GameFoundation=absent Cuvara.DOTS.Tests.Editor=present Cuvara.DOTS.Tests.Runtime=present Cuvara.DOTS.Tests.GameLogic=present Cuvara.DOTS.Tests.Netcode=absent Cuvara.DOTS.Tests.Prediction=absent Cuvara.DOTS.Tests.Physics=absent Cuvara.DOTS.Tests.DI=absent
 
@@ -380,7 +380,7 @@ jobs:
       - name: Inventory compiled assemblies
         if: always()
         run: |
-          mkdir -p artifacts
+          mkdir -p artifacts && sudo chmod -R a+rwX artifacts
           python3 package/.github/scripts/inventory_assemblies.py Library/ScriptAssemblies artifacts/assemblies.md \
             Cuvara.DOTS.Runtime=present Cuvara.DOTS.GameLogic=present Cuvara.DOTS.Netcode=present Cuvara.DOTS.Netcode.Prediction=present Cuvara.DOTS.Physics=absent Cuvara.DOTS.GameFoundation=absent Cuvara.DOTS.Tests.Editor=present Cuvara.DOTS.Tests.Runtime=present Cuvara.DOTS.Tests.GameLogic=present Cuvara.DOTS.Tests.Netcode=present Cuvara.DOTS.Tests.Prediction=present Cuvara.DOTS.Tests.Physics=absent
 
@@ -510,7 +510,7 @@ jobs:
       - name: Inventory compiled assemblies
         if: always()
         run: |
-          mkdir -p artifacts
+          mkdir -p artifacts && sudo chmod -R a+rwX artifacts
           python3 package/.github/scripts/inventory_assemblies.py Library/ScriptAssemblies artifacts/assemblies.md \
             Cuvara.DOTS.Runtime=present Cuvara.DOTS.Editor=present Cuvara.DOTS.GameLogic=absent Cuvara.DOTS.Netcode=absent Cuvara.DOTS.Netcode.Prediction=absent Cuvara.DOTS.Physics=absent Cuvara.DOTS.DI=absent Cuvara.DOTS.GameFoundation=absent Cuvara.DOTS.Tests.Editor=present Cuvara.DOTS.Tests.Runtime=present Cuvara.DOTS.Tests.GameLogic=absent Cuvara.DOTS.Tests.Netcode=absent Cuvara.DOTS.Tests.Prediction=absent Cuvara.DOTS.Tests.Physics=absent Cuvara.DOTS.Tests.DI=absent
 
@@ -627,7 +627,7 @@ jobs:
       - name: Inventory compiled assemblies
         if: always()
         run: |
-          mkdir -p artifacts
+          mkdir -p artifacts && sudo chmod -R a+rwX artifacts
           python3 package/.github/scripts/inventory_assemblies.py Library/ScriptAssemblies artifacts/assemblies.md \
             Cuvara.DOTS.Runtime=present Cuvara.DOTS.Physics=present Cuvara.DOTS.Tests.Physics=present Cuvara.DOTS.Netcode=absent Cuvara.DOTS.Netcode.Prediction=absent Cuvara.DOTS.GameLogic=absent Cuvara.DOTS.DI=absent Cuvara.DOTS.GameFoundation=absent Cuvara.DOTS.Tests.Editor=present Cuvara.DOTS.Tests.Runtime=present Cuvara.DOTS.Tests.Netcode=absent Cuvara.DOTS.Tests.Prediction=absent Cuvara.DOTS.Tests.GameLogic=absent Cuvara.DOTS.Tests.DI=absent
 
@@ -742,7 +742,7 @@ jobs:
       - name: Inventory compiled assemblies
         if: always()
         run: |
-          mkdir -p artifacts
+          mkdir -p artifacts && sudo chmod -R a+rwX artifacts
           python3 package/.github/scripts/inventory_assemblies.py Library/ScriptAssemblies artifacts/assemblies.md \
             Cuvara.DOTS.Runtime=present Cuvara.DOTS.Netcode=present Cuvara.DOTS.Netcode.Prediction=present Cuvara.DOTS.GameLogic=present Cuvara.DOTS.DI=present Cuvara.DOTS.Physics=absent Cuvara.DOTS.GameFoundation=absent Cuvara.DOTS.Tests.Editor=present Cuvara.DOTS.Tests.Runtime=present Cuvara.DOTS.Tests.GameLogic=present Cuvara.DOTS.Tests.Netcode=present Cuvara.DOTS.Tests.Prediction=present Cuvara.DOTS.Tests.DI=present Cuvara.DOTS.Tests.Physics=absent
 
@@ -854,7 +854,7 @@ jobs:
       - name: Inventory compiled assemblies
         if: always()
         run: |
-          mkdir -p artifacts
+          mkdir -p artifacts && sudo chmod -R a+rwX artifacts
           python3 package/.github/scripts/inventory_assemblies.py Library/ScriptAssemblies artifacts/assemblies.md \
             Cuvara.DOTS.Runtime=present Cuvara.DOTS.GameFoundation=present Cuvara.DOTS.Netcode=absent Cuvara.DOTS.Netcode.Prediction=absent Cuvara.DOTS.GameLogic=absent Cuvara.DOTS.Physics=absent Cuvara.DOTS.Tests.Editor=present Cuvara.DOTS.Tests.Runtime=present Cuvara.DOTS.Tests.Netcode=absent Cuvara.DOTS.Tests.Prediction=absent Cuvara.DOTS.Tests.GameLogic=absent Cuvara.DOTS.Tests.Physics=absent
 
