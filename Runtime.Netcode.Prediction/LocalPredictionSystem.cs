@@ -65,6 +65,12 @@ namespace Cuvara.DOTS.Netcode.Prediction
         private EntityQuery _localEntities;
         private long _lastAckTick;
 
+        /// <summary>Anchor sequence at the last reconcile, so an ack without a fresh anchor waits a frame.</summary>
+        private uint _lastAnchorSequence;
+
+        /// <summary><see cref="DotsEntityView.Generation"/> the ack/anchor memory belongs to.</summary>
+        private int _lastGeneration;
+
         public void OnCreate(ref SystemState state)
         {
             _localEntities = new EntityQueryBuilder(Allocator.Temp)
@@ -72,6 +78,7 @@ namespace Cuvara.DOTS.Netcode.Prediction
                 .Build(ref state);
 
             state.RequireForUpdate<LocalPredictionReference>();
+            state.RequireForUpdate<NetworkEntityViewReference>();
             state.RequireForUpdate(_localEntities);
         }
 
@@ -80,6 +87,20 @@ namespace Cuvara.DOTS.Netcode.Prediction
             var reference = SystemAPI.ManagedAPI.GetSingleton<LocalPredictionReference>();
             var predictor = reference.Predictor;
             if (predictor == null) return;
+
+            var view = SystemAPI.ManagedAPI.GetSingleton<NetworkEntityViewReference>().View;
+            if (view == null) return;
+
+            // A new generation is a new server session: its ack ticks start wherever that server
+            // is, possibly below the last one seen, and the anchor sequence restarts with the new
+            // mirror. Carrying the old memory across would make `ackTick > _lastAckTick` false for
+            // the rest of the session and silently disable reconciliation after every reconnect.
+            if (view.Generation != _lastGeneration)
+            {
+                _lastGeneration = view.Generation;
+                _lastAckTick = 0L;
+                _lastAnchorSequence = 0u;
+            }
 
             var entityManager = state.EntityManager;
             var entities = _localEntities.ToEntityArray(Allocator.Temp);
@@ -114,13 +135,19 @@ namespace Cuvara.DOTS.Netcode.Prediction
 
                 var anchor = entityManager.GetComponentData<ReconciliationAnchor>(entity);
 
-                // Only on a new acknowledgement. Reconciling every frame against an unchanged tick
-                // would replay the same unacknowledged inputs repeatedly and count corrections that
-                // never happened, which is a diagnostics lie as well as wasted work.
+                // Only on a new acknowledgement AND a fresh anchor. Reconciling every frame against
+                // an unchanged tick would replay the same unacknowledged inputs repeatedly and count
+                // corrections that never happened, which is a diagnostics lie as well as wasted
+                // work. And an ack that advanced while the anchor did not — the binder merged a
+                // newer snapshot after this frame's drain — would pair the new tick with the
+                // previous snapshot's position; that pair is not a state the server ever held, so
+                // it waits for next frame's drain. An anchor at sequence zero has never received a
+                // state and is the spawn placeholder, never something to rewind to.
                 var ackTick = reference.World?.AckTick ?? 0L;
-                if (ackTick > _lastAckTick)
+                if (ackTick > _lastAckTick && anchor.Sequence != 0u && anchor.Sequence != _lastAnchorSequence)
                 {
                     _lastAckTick = ackTick;
+                    _lastAnchorSequence = anchor.Sequence;
 
                     // Speed first, then position — the same order WorldViewBinder uses on the
                     // GameObject path, and the order matters: Reconcile replays every
@@ -171,7 +198,7 @@ namespace Cuvara.DOTS.Netcode.Prediction
                 // Mapped here, on the way out, using the same SnapshotSpaceMapping the adapter uses —
                 // read from the view singleton rather than duplicated, so the predicted and the
                 // authoritative paths cannot drift apart in how they place the world.
-                var mapping = SystemAPI.ManagedAPI.GetSingleton<NetworkEntityViewReference>().View.Mapping;
+                var mapping = view.Mapping;
                 var predicted = predictor.Position;
 
                 var transform = entityManager.GetComponentData<LocalTransform>(entity);

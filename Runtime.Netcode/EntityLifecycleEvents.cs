@@ -41,6 +41,14 @@ namespace Cuvara.DOTS.Netcode
         /// these, in no particular order.
         /// </summary>
         Teardown = 2,
+
+        /// <summary>
+        /// The view began a new generation (<see cref="DotsEntityView.BeginGeneration"/> — a
+        /// reconnect or map transfer) and the drain tore this mirror down before applying anything
+        /// from the new session. Like <see cref="Teardown"/>, this is about the mirror, not the
+        /// entity: the wire never said it left.
+        /// </summary>
+        SessionReset = 3,
     }
 
     /// <summary>
