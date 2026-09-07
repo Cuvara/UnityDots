@@ -52,9 +52,9 @@ namespace Cuvara.DOTS.Tests.Editor
         public void TearDown()
         {
             _catalog.Dispose();
-            Object.DestroyImmediate(_library);
-            Object.DestroyImmediate(_goblin);
-            Object.DestroyImmediate(_torch);
+            UnityEngine.Object.DestroyImmediate(_library);
+            UnityEngine.Object.DestroyImmediate(_goblin);
+            UnityEngine.Object.DestroyImmediate(_torch);
             DotsViewBootstrap.Uninstall(_world);
             _world.Dispose();
         }
