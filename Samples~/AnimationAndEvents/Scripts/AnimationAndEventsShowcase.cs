@@ -78,7 +78,7 @@ namespace Cuvara.DOTS.Samples.AnimationAndEvents
             // One definition, keyed to match the ViewConfig below. The provider makes a Unity
             // primitive when no prefab is given, which is what keeps this sample free of any
             // asset dependency at all.
-            _registry = new EntityViewRegistry(new PrimitiveViewAssetProvider(
+            var provider = new PrimitiveViewAssetProvider(
                 new[]
                 {
                     new PrimitiveViewDefinition
@@ -89,7 +89,17 @@ namespace Cuvara.DOTS.Samples.AnimationAndEvents
                     },
                 },
                 poolRoot: null,
-                verbose: false));
+                verbose: false);
+
+            // WARM IT FIRST. The provider reports IsWarm(key) false until this runs, and the spawn
+            // system defers an entity whose key is cold — so without this the entities exist, carry
+            // the right pose, and simply never get a view. Nothing errors; the seam has no
+            // GameObject to talk to and the scene looks like a working scene doing nothing. That is
+            // exactly how this sample shipped its first build, and why the package now has a test
+            // asserting the receiver is CALLED rather than only that the pose arrived.
+            provider.PrewarmAsync(PlayerType, 2);
+
+            _registry = new EntityViewRegistry(provider);
             DotsViewBootstrap.Install(_world, _registry);
 
             _config = ScriptableObject.CreateInstance<ViewConfig>();
@@ -148,6 +158,17 @@ namespace Cuvara.DOTS.Samples.AnimationAndEvents
         {
             if (_view == null) return;
 
+            // Attach the receiver BEFORE the first swing, not after it.
+            //
+            // Views are provisioned over a frame or two, and this sample's receiver is attached to
+            // the instance when it first appears rather than baked into a prefab — so swinging on
+            // frame 0 reported an action to a view that had no receiver yet, and the first swing
+            // was never drawn. A built player showed 9 swings played against 10 sent, which was
+            // briefly and wrongly diagnosed as a defect in EntityPoseViewSystem. It was this.
+            //
+            // A real game attaches the component in the prefab and has no such window.
+            if (FindFlash() == null) return;
+
             if (Time.time >= _nextSwingAt)
             {
                 _nextSwingAt = Time.time + Mathf.Max(0.1f, secondsPerSwing);
@@ -155,7 +176,20 @@ namespace Cuvara.DOTS.Samples.AnimationAndEvents
             }
 
             Redraw();
+
+            // One self-check, once. See the probe sample for why a built player needs this: a
+            // scene that failed to bind looks exactly like one that is working and idle.
+            if (!_selfChecked && Time.time > 8f)
+            {
+                _selfChecked = true;
+                var flash = FindFlash();
+                Debug.Log($"[AnimationAndEvents] SELFCHECK serverSeq={_serverActionSeq} " +
+                          $"swingsPlayed={(flash == null ? -1 : flash.Swings)} " +
+                          $"eventsLogged={_log.Count} victimHp={_victimHp}");
+            }
         }
+
+        private bool _selfChecked;
 
         private void Swing()
         {

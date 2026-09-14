@@ -93,6 +93,19 @@ namespace Cuvara.DOTS.Netcode
 
                 if (!actionChanged && !retriggered) continue;
 
+                // Resolved BEFORE the state is recorded, and the order is the whole of this fix.
+                // A view is provisioned asynchronously — the asset may still be loading when the
+                // entity's first action arrives — and marking the action as shown while there was
+                // nobody to show it to CONSUMES it: the view appears a frame later and is never
+                // told about the swing that happened just before it existed. An entity that spawns
+                // and immediately attacks would silently skip its first attack animation, forever,
+                // with nothing anywhere reporting a problem. Caught by running a built player and
+                // seeing 9 swings played against 10 sent.
+                // Recorded before the view is resolved, and that is safe rather than lucky: the
+                // query above requires EntityViewLink, so an entity whose view has not been
+                // provisioned yet is not in this loop AT ALL and its action cannot be consumed
+                // here. The `go == null` case below is the narrower one — a link that outlived the
+                // GameObject — and EntityViewLinkCleanup clears those.
                 var next = new EntityPoseView
                 {
                     ShownAction = action,

@@ -207,6 +207,262 @@ namespace Cuvara.DOTS.Tests.Netcode
             Assert.That(second.ActionSeq, Is.Not.EqualTo(first.ActionSeq));
         }
 
+        // ── The animation seam ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// Records what the seam reported, so a test can assert on the calls rather than on a
+        /// component's internal state.
+        /// </summary>
+        private sealed class RecordingReceiver : MonoBehaviour, IEntityAnimationReceiver
+        {
+            public readonly List<(SimAction Action, bool Retriggered)> Calls =
+                new List<(SimAction, bool)>();
+
+            public void OnAction(SimAction action, bool retriggered) => Calls.Add((action, retriggered));
+        }
+
+        /// <summary>
+        /// Attaches a recorder to the GameObject standing in for <paramref name="id"/>.
+        /// </summary>
+        private RecordingReceiver AttachReceiver(string id)
+        {
+            var entity = Find(id);
+            Assert.That(entity, Is.Not.EqualTo(Entity.Null));
+            Assert.That(_entityManager.HasComponent<EntityViewLink>(entity), Is.True,
+                "no view was ever spawned for this entity, so there is nothing for the seam to talk to");
+
+            var go = _registry.Get(_entityManager.GetComponentData<EntityViewLink>(entity).ViewId);
+            Assert.That(go, Is.Not.Null);
+            return go.AddComponent<RecordingReceiver>();
+        }
+
+        /// <summary>
+        /// The test that was missing, and whose absence let a built player ship with the seam
+        /// never firing. Everything upstream — the pose on the mirror, the counter, the event
+        /// buffer — was asserted; that the receiver is actually CALLED was not.
+        /// </summary>
+        [Test]
+        public void TheReceiverIsToldAboutANewAction()
+        {
+            Spawn("r1");
+            State("r1");
+            Tick();
+
+            var receiver = AttachReceiver("r1");
+
+            Pose("r1", facing: 1u, action: SimAction.Attacking, seq: 1u);
+            Tick();
+
+            Assert.That(receiver.Calls, Has.Count.EqualTo(1));
+            Assert.That(receiver.Calls[0].Action, Is.EqualTo(SimAction.Attacking));
+            // False on a NEW action: that is a transition, and a state machine driven by the
+            // action plays it anyway. True here would make every implementation double-trigger.
+            Assert.That(receiver.Calls[0].Retriggered, Is.False);
+        }
+
+        [Test]
+        public void ARepeatedActionIsReportedAsARetrigger()
+        {
+            Spawn("r1");
+            State("r1");
+            Tick();
+            var receiver = AttachReceiver("r1");
+
+            Pose("r1", facing: 1u, action: SimAction.Attacking, seq: 1u);
+            Tick();
+            Pose("r1", facing: 1u, action: SimAction.Attacking, seq: 2u);
+            Tick();
+
+            Assert.That(receiver.Calls, Has.Count.EqualTo(2));
+            Assert.That(receiver.Calls[1].Retriggered, Is.True,
+                "the second swing is a new occurrence even though the action did not change");
+        }
+
+        /// <summary>
+        /// The mirror-image failure: a continuous state must not retrigger on every frame it is
+        /// resent. A walking entity is posed on every snapshot.
+        /// </summary>
+        [Test]
+        public void AnUnchangedActionIsNotReportedAgain()
+        {
+            Spawn("r1");
+            State("r1");
+            Tick();
+            var receiver = AttachReceiver("r1");
+
+            Pose("r1", facing: 1u, action: SimAction.Moving, seq: 4u);
+            Tick();
+            Pose("r1", facing: 1u, action: SimAction.Moving, seq: 4u);
+            Tick();
+            Pose("r1", facing: 1u, action: SimAction.Moving, seq: 4u);
+            Tick();
+
+            Assert.That(receiver.Calls, Has.Count.EqualTo(1),
+                "a walk cycle retriggered once per snapshot is the failure this counter exists to avoid");
+        }
+
+        /// <summary>
+        /// Zero means the server sends no counter. Treating it as an edge would retrigger every
+        /// animation on every snapshot from an older server.
+        /// </summary>
+        [Test]
+        public void AZeroCounterNeverRetriggers()
+        {
+            Spawn("r1");
+            State("r1");
+            Tick();
+            var receiver = AttachReceiver("r1");
+
+            Pose("r1", facing: 1u, action: SimAction.Attacking, seq: 0u);
+            Tick();
+            Pose("r1", facing: 1u, action: SimAction.Attacking, seq: 0u);
+            Tick();
+
+            // One call for entering the action, and nothing after it.
+            Assert.That(receiver.Calls, Has.Count.EqualTo(1));
+            Assert.That(receiver.Calls[0].Retriggered, Is.False);
+        }
+
+        /// <summary>
+        /// Warm only once <see cref="Warm"/> is called, and every instance it hands out already
+        /// carries a <see cref="RecordingReceiver"/> — the way a real prefab would.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="StubViewAssetProvider"/> is always warm, so a view appears in the same frame
+        /// the entity does and the deferral path is never exercised by it. That is why the defect
+        /// this fixture reproduces was invisible to every existing test.
+        /// </remarks>
+        private sealed class ColdViewAssetProvider : Cuvara.DOTS.Provisioning.IViewAssetProvider
+        {
+            private readonly HashSet<string> _warm = new HashSet<string>();
+            public readonly List<RecordingReceiver> Handed = new List<RecordingReceiver>();
+
+            public void Warm(string key) => _warm.Add(key);
+
+            public System.Threading.Tasks.Task PrewarmAsync(
+                string key, int count, System.Threading.CancellationToken cancellationToken = default)
+            {
+                Warm(key);
+                return System.Threading.Tasks.Task.CompletedTask;
+            }
+
+            public bool IsWarm(string key) => key != null && _warm.Contains(key);
+
+            public GameObject Acquire(string key, Vector3 position, Quaternion rotation, Transform parent = null)
+            {
+                var instance = new GameObject(key);
+                instance.transform.SetPositionAndRotation(position, rotation);
+                if (parent != null) instance.transform.SetParent(parent, true);
+                var receiver = instance.AddComponent<RecordingReceiver>();
+                Handed.Add(receiver);
+                return instance;
+            }
+
+            public System.Threading.Tasks.Task<GameObject> AcquireAsync(
+                string key, Vector3 position, Quaternion rotation, Transform parent = null,
+                System.Threading.CancellationToken cancellationToken = default)
+                => System.Threading.Tasks.Task.FromResult(Acquire(key, position, rotation, parent));
+
+            public void ReleaseInstance(GameObject instance)
+            {
+                if (instance != null) Object.DestroyImmediate(instance);
+            }
+
+            public void Release(string key) => _warm.Remove(key);
+        }
+
+        /// <summary>
+        /// An action that happens while the view is still cold is reported once the view arrives.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A CHARACTERISATION test, not a regression test — it passes before and after the change
+        /// that prompted it, and that is the finding. The system's query requires
+        /// <c>EntityViewLink</c>, so an entity whose asset is still loading is not in the loop at
+        /// all and its action cannot be consumed; the guarantee comes from the query filter, which
+        /// nothing had written down.
+        /// </para>
+        /// <para>
+        /// It exists because a built player showed 9 swings played against 10 sent and that was
+        /// first diagnosed HERE, in the package. It was wrong: the miss was the sample attaching
+        /// its receiver lazily, one frame after the first swing. This fixture is what proved the
+        /// package innocent, and it is kept so the next person does not have to re-derive it —
+        /// <see cref="StubViewAssetProvider"/> is always warm and cannot exercise deferral at all.
+        /// </para>
+        /// </remarks>
+        [Test]
+        public void AnActionWhileTheViewIsStillColdIsReportedOnceItArrives()
+        {
+            // A world of its own: the shared fixture's provider is always warm and cannot defer.
+            using var world = new World("Cuvara.DOTS.ColdViewTest");
+            var provider = new ColdViewAssetProvider();
+            var registry = new EntityViewRegistry(provider);
+            DotsViewBootstrap.Install(world, registry);
+
+            var config = ScriptableObject.CreateInstance<ViewConfig>();
+            config.Configure(PlayerType);
+            var library = ScriptableObject.CreateInstance<ViewArchetypeLibrary>();
+            library.Configure(new ViewArchetypeLibrary.Entry { Name = RemoteArchetype, Config = config });
+            var catalog = new ViewConfigCatalog();
+            catalog.Build(library);
+            catalog.Install(world);
+
+            var view = new DotsEntityView(
+                catalog,
+                new TypeArchetypeResolver(RemoteArchetype, null, new TypeArchetypeResolver.Rule(PlayerType, RemoteArchetype)),
+                SnapshotSpaceMapping.XZPlane);
+            DotsNetcodeBootstrap.Install(world, view);
+
+            void Step()
+            {
+                world.GetExistingSystemManaged<NetcodeSystemGroup>().Update();
+                world.GetExistingSystemManaged<ViewSystemGroup>().Update();
+            }
+
+            try
+            {
+                ((IEntityView)view).Spawn("r1", isLocal: false, type: PlayerType);
+                ((IEntityView)view).SetState("r1", 0f, 0f, 100, 100);
+                ((IEntityPoseView)view).SetPose("r1", 1u, SimAction.Attacking, 1u);
+
+                // Cold: the mirror exists, the view does not.
+                Step();
+                Assert.That(provider.Handed, Is.Empty, "the provider was warm after all — this fixture proves nothing");
+
+                // The asset lands. Nothing new arrives from the server.
+                provider.Warm(PlayerType);
+                Step();
+                Step();
+
+                Assert.That(provider.Handed, Has.Count.EqualTo(1), "no view was ever provisioned");
+                Assert.That(provider.Handed[0].Calls, Has.Count.EqualTo(1),
+                    "the action was consumed while no view existed to show it to");
+                Assert.That(provider.Handed[0].Calls[0].Action, Is.EqualTo(SimAction.Attacking));
+            }
+            finally
+            {
+                DotsNetcodeBootstrap.Uninstall(world);
+                catalog.Dispose();
+                Object.DestroyImmediate(library);
+                Object.DestroyImmediate(config);
+                DotsViewBootstrap.Uninstall(world);
+            }
+        }
+
+        [Test]
+        public void AViewWithNoReceiverIsHarmless()
+        {
+            Spawn("r1");
+            State("r1");
+            Tick();
+
+            Assert.DoesNotThrow(() =>
+            {
+                Pose("r1", facing: 1u, action: SimAction.Attacking, seq: 1u);
+                Tick();
+            });
+        }
+
         // ── Game events ──────────────────────────────────────────────────────────
 
         private static ResolvedGameEvent Damage(string source, string target, int amount = 25) =>
