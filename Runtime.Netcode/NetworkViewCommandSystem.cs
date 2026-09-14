@@ -135,6 +135,7 @@ namespace Cuvara.DOTS.Netcode
 
         public void OnUpdate(ref SystemState state)
         {
+            var viewEntity = SystemAPI.ManagedAPI.GetSingletonEntity<NetworkEntityViewReference>();
             var view = SystemAPI.ManagedAPI.GetSingleton<NetworkEntityViewReference>().View;
             if (view == null) return;
 
@@ -206,10 +207,20 @@ namespace Cuvara.DOTS.Netcode
                         case NetworkViewCommandKind.Despawn:
                             ApplyDespawn(entityManager, lifecycle, command);
                             break;
+
+                        case NetworkViewCommandKind.Pose:
+                            ApplyPose(entityManager, command);
+                            break;
                     }
                 }
 
                 if (count > 0) metrics.NoteDrain(count, NetworkIngestionMetrics.Now - started, oldestAge);
+
+                // Events AFTER the commands, always. An event routinely names an entity whose
+                // spawn is in the same drain — something appearing and immediately taking a hit —
+                // and resolving events first would leave exactly those participants null while the
+                // mirror existed one line later.
+                DrainGameEvents(entityManager, view, viewEntity);
             }
 
             if (timed) SystemAPI.SetSingleton(timeline);
@@ -323,6 +334,110 @@ namespace Cuvara.DOTS.Netcode
             {
                 lifecycle.PublishSpawned(new NetworkEntitySpawned(
                     command.Id.ToString(), command.Type.ToString(), command.IsLocal, entity));
+            }
+        }
+
+        /// <summary>
+        /// Moves this frame's game events onto the view entity's <see cref="NetworkGameEvent"/>
+        /// buffer, resolving participants to mirrors where there are any.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>The buffer is CLEARED first, every frame.</b> It holds one frame of events and no
+        /// more: events are not state, and a consumer that read a stale buffer would show a player
+        /// the same hit twice. A frame in which nothing happened leaves it empty, which is the
+        /// honest report.
+        /// </para>
+        /// <para>
+        /// <b>An unresolved participant is null, not a dropped event.</b> Three ordinary reasons
+        /// produce one — outside the AOI, no mirror yet, or no participant sent — and none of them
+        /// makes the event worthless. A damage number with no visible attacker is still the number
+        /// a player needs; the alternative is a health bar that drops with no explanation.
+        /// </para>
+        /// </remarks>
+        private void DrainGameEvents(EntityManager entityManager, DotsEntityView view, Entity viewEntity)
+        {
+            if (!entityManager.HasBuffer<NetworkGameEvent>(viewEntity)) return;
+
+            var buffer = entityManager.GetBuffer<NetworkGameEvent>(viewEntity);
+            buffer.Clear();
+
+            while (view.TryDequeueGameEvent(out var pending))
+            {
+                buffer.Add(new NetworkGameEvent
+                {
+                    Type = pending.Type,
+                    Source = ResolveMirror(entityManager, pending.SourceId),
+                    Target = ResolveMirror(entityManager, pending.TargetId),
+                    SourceId = pending.SourceId,
+                    TargetId = pending.TargetId,
+                    Amount = pending.Amount,
+                    AbilityId = pending.AbilityId,
+                    Flags = pending.Flags,
+                });
+            }
+        }
+
+        /// <summary>
+        /// The mirror for an id, or <see cref="Entity.Null"/> when this client has none.
+        /// </summary>
+        /// <remarks>
+        /// Liveness is checked as well as presence: the map can hold a mapping for an entity a
+        /// consumer's own system destroyed, and handing that out would give a consumer a stale
+        /// Entity that throws the first time it is read. Null is the honest answer.
+        /// </remarks>
+        private Entity ResolveMirror(EntityManager entityManager, in FixedString64Bytes id)
+        {
+            if (id.Length == 0) return Entity.Null;
+            if (!_entities.TryGetValue(id, out var mirror)) return Entity.Null;
+            return IsLiveMirror(entityManager, mirror.Entity) ? mirror.Entity : Entity.Null;
+        }
+
+        /// <summary>
+        /// Writes the server's reported pose onto the mirror.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Added rather than set when absent.</b> An entity spawned before this package
+        /// understood poses, or spawned by a consumer's own archetype, has no
+        /// <see cref="EntityPose"/> — and a <c>SetComponentData</c> on a missing component throws
+        /// inside the drain, which would take the whole ingestion loop down over a presentation
+        /// field. The structural add costs a chunk move once per entity, never per pose.
+        /// </para>
+        /// <para>
+        /// <b>Every field is written, including zeros.</b> Zero means "this server does not send
+        /// it", and holding the last non-zero value here would make an old server look like one
+        /// that had stopped turning rather than one that never reported a facing. Deciding what to
+        /// DO about an absent value is the view's job — see <see cref="EntityPose"/>.
+        /// </para>
+        /// </remarks>
+        private void ApplyPose(EntityManager entityManager, in NetworkViewCommand command)
+        {
+            if (!_entities.TryGetValue(command.Id, out var mirror)) return;
+
+            var entity = mirror.Entity;
+            if (!IsLiveMirror(entityManager, entity))
+            {
+                // Same reasoning as ApplyState: the mirror is gone, and a pose is not worth
+                // reporting a despawn over — ApplyState will do that on the next state, which
+                // always follows.
+                return;
+            }
+
+            var pose = new EntityPose
+            {
+                FacingBrad = command.FacingBrad,
+                Action = command.Action,
+                ActionSeq = command.ActionSeq,
+            };
+
+            if (entityManager.HasComponent<EntityPose>(entity))
+            {
+                entityManager.SetComponentData(entity, pose);
+            }
+            else
+            {
+                entityManager.AddComponentData(entity, pose);
             }
         }
 

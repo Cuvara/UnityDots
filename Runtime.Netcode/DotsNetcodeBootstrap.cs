@@ -46,6 +46,11 @@ namespace Cuvara.DOTS.Netcode
             {
                 entity = entityManager.CreateEntity();
                 entityManager.AddComponentObject(entity, new NetworkEntityViewReference { View = view });
+                // One frame of game events lives here. Added at install rather than lazily in the
+                // drain so a consumer can query for it at any point after Install and find it —
+                // a buffer that appears only once the first event arrives would make "no events
+                // yet" and "events not installed" the same observation.
+                entityManager.AddBuffer<NetworkGameEvent>(entity);
 #if UNITY_EDITOR
                 entityManager.SetName(entity, "NetworkEntityView");
 #endif
@@ -54,6 +59,12 @@ namespace Cuvara.DOTS.Netcode
             {
                 entity = query.GetSingletonEntity();
                 entityManager.GetComponentObject<NetworkEntityViewReference>(entity).View = view;
+                // A reinstall onto an existing singleton: the entity predates this feature if the
+                // buffer is absent, so add it rather than assuming it.
+                if (!entityManager.HasBuffer<NetworkGameEvent>(entity))
+                {
+                    entityManager.AddBuffer<NetworkGameEvent>(entity);
+                }
             }
 
             InstallSystems(world);
@@ -102,6 +113,14 @@ namespace Cuvara.DOTS.Netcode
             viewGroup.AddSystemToUpdateList(interpolation);
             interpolation.AddSystemToUpdateList(world.GetOrCreateSystem<InterpolationClockSystem>());
             interpolation.AddSystemToUpdateList(world.GetOrCreateSystem<RemoteInterpolationSystem>());
+
+            // The pose->animation seam is installed from here for exactly the same reason as the
+            // interpolation systems above: it reads EntityPose, which carries a Shared.GameLogic
+            // enum, and the core assembly must keep compiling with com.cuvara.netcode absent. The
+            // sync group is created by the core bootstrap and this adds one more member to it.
+            var viewSync = world.GetOrCreateSystemManaged<ViewTransformSyncGroup>();
+            viewGroup.AddSystemToUpdateList(viewSync);
+            viewSync.AddSystemToUpdateList(world.GetOrCreateSystem<EntityPoseViewSystem>());
 
             // Both singletons exist from installation, with netcode's defaults and this package's
             // default mapping, so a world whose consumer never calls Install(world, view) — a test

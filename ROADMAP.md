@@ -9,6 +9,12 @@ per-feature and per-module classification, with tested configurations and platfo
 **Version labels:** shipped work carries the version it shipped in, matching `package.json` and
 `CHANGELOG.md`. Unshipped work carries no version label, only an order.
 
+> **This file went stale once and was believed.** Between 0.27.1 and 0.29.0 the "In progress"
+> branches merged and the Done table was not updated with them, so the camera installer read
+> as missing for two releases and was planned for a third time on that basis. The header
+> above says the file is written from the tree; that is a commitment, not a description, and
+> the check is `git log` on the module, not this table.
+
 ## Scope
 
 **Hybrid** building blocks: simulation runs in ECS, visuals are GameObject/MonoBehaviour. The
@@ -22,7 +28,7 @@ Two rules constrain everything below.
   Anything needing more lives in a separate assembly gated by `versionDefines` +
   `defineConstraints`, and is absent rather than broken when its dependency is. Verified by CI's
   *no optional packages* row and by `Samples~/HybridViews`.
-- **Dependency direction.** `com.cuvara.dots` may depend on `com.cuvara.netcode` (≥ 0.31.0). The
+- **Dependency direction.** `com.cuvara.dots` may depend on `com.cuvara.netcode` (≥ 0.40.0). The
   reverse is forbidden, in every release. Netcode's `IEntityView` stays three methods; the adapter
   adds its own entry points (`SetStateAtTick`, `Lifecycle`) beside it rather than widening it.
 
@@ -49,9 +55,13 @@ Two rules constrain everything below.
 | Editor debug window | 0.26.0 | implemented, untested | Window › Cuvara › DOTS View Debug. |
 | `PooledViewAssetProvider` | 0.27.0 | implemented (12 tests); not in client | SetActive pool. Identity/ownership/disposal fixes in progress (D02). |
 | `EntityArchetypePreset` + `ArchetypeFactory` | 0.27.0 | implemented (8 tests); not in client | Component presets. Validation in progress (D05). |
-| `CameraFollowSystem` | 0.27.0 | implemented system, **no installer**, untested | `Camera.main` only; needs `CameraFollowConfig` + one `CameraFollowTarget`. |
+| `CameraFollowSystem` + `CameraFollowBootstrap` | system 0.27.0, installer 0.28.0 | implemented, tested; not in client | `Install`/`Uninstall`/`Validate`/`ResetSmoothing`, `CameraFollowBootstrapTests`. **This row read "no installer, untested" until 0.30.0** — stale by two releases, and it was read as a gap and planned against. Left visible rather than quietly corrected: a roadmap that describes an older version than the tree is the trap this file's own header exists to prevent. |
 | Minimap module | types 0.27.0; **producer on `feat/matrix-events`** | implemented (23 tests), sample consumer; not in client | `MinimapMarker` opt-in, `MinimapDataSystem` producer, `MinimapBootstrap` module (Session); netcode adapter marks mirrors through `IMinimapCategoryResolver`, so the map shows only what the server replicated. |
 | Network lifecycle events | structs 0.27.0; **published on `feat/matrix-events`** | implemented (24 tests), sample consumer, DI wiring; not yet in client | `NetworkEntitySpawned`/`Despawned` with `Entity`+version and `NetworkDespawnReason`; `NetworkEntityLifecycle`; `Uninstall(destroyMirrors)`. Contract: `Documentation~/NETWORK-LIFECYCLE.md`. |
+
+| Entity pose over the netcode adapter | 0.30.0 | implemented, in client | `DotsEntityView` implements `IEntityPoseView`; `EntityPose` (facing, action, retrigger counter) written by the drain. Before this the DOTS path received **no facing and no action at all** — the adapter implemented `IEntityView` only, so a DOTS client could not turn a character or animate one. |
+| Animation seam | 0.30.0 | implemented, sample consumer | `IEntityAnimationReceiver` + `EntityPoseViewSystem`. The package owns the one fact a client cannot derive — the server says this entity entered an action — and owns the two rules that are easy to get wrong (retrigger by inequality; remember per ENTITY, not per pooled view). It owns no Animator and no trigger names. |
+| Game events in ECS | 0.30.0 | implemented, sample consumer | `NetworkGameEvent` buffer on the view singleton, one frame's worth, cleared every drain. `DotsEntityView.EnqueueGameEvents` is the host's one-line seam; the package does not reach for the session. |
 
 ## In progress
 
@@ -62,7 +72,7 @@ improvement plan §9:
 |---|---|---|
 | `feat/pool-chunk` | D02, D03 | `PooledViewAssetProvider` identity/ownership/disposal; `ChunkViewProvisioner` cancellation and state transitions. Everything under `Runtime/Provisioning/`. |
 | `feat/bootstrap-config` | D04, D05 (D09 camera behaviour, D07 physics installer as they land) | Explicit install/uninstall for camera, physics and other optional systems; `ViewConfig`/`ArchetypeFactory` validation. |
-| `feat/matrix-events` | D01, D06, D08 | This file, `SUPPORT-MATRIX.md`, netcode floor 0.31.0, lifecycle event publishing, minimap producer + overlay consumer contract, 2D sorting marked unsupported. |
+| `feat/matrix-events` | D01, D06, D08 | This file, `SUPPORT-MATRIX.md`, netcode floor 0.40.0, lifecycle event publishing, minimap producer + overlay consumer contract, 2D sorting marked unsupported. |
 
 Descriptions of provisioning, camera and physics elsewhere in this document are **0.27.1
 behaviour**; they will be updated when those branches merge.

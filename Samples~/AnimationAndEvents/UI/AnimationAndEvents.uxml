@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<engine:UXML
+    xmlns:engine="UnityEngine.UIElements"
+    xmlns:editor="UnityEditor.UIElements"
+    xsi="http://www.w3.org/2001/XMLSchema-instance"
+    engine="UnityEngine.UIElements">
+
+    <engine:Style src="AnimationAndEvents.uss" />
+
+    <engine:VisualElement name="animation-and-events" class="phaseb" picking-mode="Ignore">
+        <engine:VisualElement class="phaseb__panel">
+
+            <engine:Label text="Animation and events" class="phaseb__title" />
+            <engine:Label class="phaseb__subtitle"
+                          text="No server, no network. A scripted DotsEntityView drives the real drain, the real pose component and the real event buffer." />
+
+            <engine:Label text="Pose" class="phaseb__section" />
+            <engine:Label name="pose-line" class="phaseb__readout" />
+            <engine:Label name="swing-line" class="phaseb__readout" />
+            <engine:VisualElement class="phaseb__row">
+                <engine:Button name="toggle-seq" text="Stop sending action_seq" class="phaseb__button" />
+            </engine:VisualElement>
+
+            <engine:Label text="Events" class="phaseb__section" />
+            <engine:Label name="hp-line" class="phaseb__readout" />
+            <engine:Label name="event-line" class="phaseb__readout" />
+            <engine:VisualElement class="phaseb__row">
+                <engine:Button name="toggle-events" text="Stop sending events" class="phaseb__button" />
+            </engine:VisualElement>
+
+        </engine:VisualElement>
+    </engine:VisualElement>
+</engine:UXML>

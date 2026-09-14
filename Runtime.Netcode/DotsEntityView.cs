@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using Cuvara.DOTS.Configuration;
+using Cuvara.Netcode.Snapshot;
 using Cuvara.Netcode.View;
 using Unity.Collections;
 using UnityEngine;
@@ -86,9 +87,23 @@ namespace Cuvara.DOTS.Netcode
     /// that; the consumer owns the sequencing.
     /// </para>
     /// </remarks>
-    public sealed class DotsEntityView : IEntityView
+    public sealed class DotsEntityView : IEntityView, IEntityPoseView
     {
         private readonly ConcurrentQueue<NetworkViewCommand> _commands = new ConcurrentQueue<NetworkViewCommand>();
+
+        /// <summary>
+        /// Game events awaiting a drain. A SECOND queue rather than another
+        /// <see cref="NetworkViewCommandKind"/>, and the reason is ordering: the command queue's
+        /// whole guarantee is that spawn precedes state precedes despawn for one entity, and an
+        /// event is not part of that sequence — it names up to two entities and has no position in
+        /// either one's lifecycle. Sharing the lane would force an event to wait behind commands it
+        /// has nothing to do with, and would make "the event about an entity that has not spawned
+        /// yet" an ordering bug rather than the ordinary case it is.
+        /// </summary>
+        private readonly ConcurrentQueue<PendingNetworkGameEvent> _events =
+            new ConcurrentQueue<PendingNetworkGameEvent>();
+
+        private int _eventsDropped;
         private readonly HashSet<string> _live = new HashSet<string>();
         private readonly Dictionary<string, int> _configIndexById = new Dictionary<string, int>();
         private readonly NetworkIngestionMetrics _metrics = new NetworkIngestionMetrics();
@@ -355,6 +370,110 @@ namespace Cuvara.DOTS.Netcode
                 ReceiveTime = receiveTimeSeconds,
             });
         }
+
+        /// <summary>
+        /// Facing, action and retrigger counter for an already-spawned id. Enqueue-only and
+        /// callable from any thread, exactly like every other method here.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Sent as its own command rather than folded into State.</b> The binder calls
+        /// <c>SetPose</c> immediately after the matching <c>SetState</c>, including on the frames
+        /// between snapshots where it re-sends an unchanged pose alongside an extrapolated
+        /// position. Folding them would mean either inventing a pose for a state that has none, or
+        /// dropping a pose that arrived without one — and both are decisions this layer has no
+        /// business making. Two commands in a guaranteed order cost one extra queue entry.
+        /// </para>
+        /// <para>
+        /// <b>The counter is carried verbatim, including zero.</b> Zero means "this server does not
+        /// send one", and squashing it to the last non-zero value here would tell every consumer
+        /// that an old server was retriggering when it was not.
+        /// </para>
+        /// </remarks>
+        public void SetPose(
+            string id, uint facingBrad, Shared.GameLogic.Components.EntityAction action, uint actionSeq)
+        {
+            if (id == null) return;
+
+            // Same guard as SetState: a pose for something this view does not believe is alive is
+            // dropped rather than resurrecting it.
+            if (!_live.Contains(id)) return;
+
+            var wireId = default(FixedString64Bytes);
+            if (wireId.CopyFromTruncated(id) != CopyError.None) return;
+
+            Enqueue(new NetworkViewCommand
+            {
+                Kind = NetworkViewCommandKind.Pose,
+                Id = wireId,
+                FacingBrad = facingBrad,
+                Action = action,
+                ActionSeq = actionSeq,
+            });
+        }
+
+        /// <summary>
+        /// Most events this view will hold between drains. Past it the OLDEST are discarded.
+        /// </summary>
+        /// <remarks>
+        /// A client whose main thread has stalled would otherwise accumulate events without limit,
+        /// and the oldest are the right ones to lose: a client catching up needs the recent world,
+        /// and a damage number from four seconds ago has nobody left to inform.
+        /// </remarks>
+        public const int MaxQueuedEvents = 256;
+
+        /// <summary>Events discarded because the queue was full. Diagnostics.</summary>
+        public int EventsDropped => Volatile.Read(ref _eventsDropped);
+
+        /// <summary>
+        /// Hands this view one snapshot's events. Enqueue-only and callable from any thread, like
+        /// every other method here.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>The host wires this, not the package.</b> Events arrive on the netcode session's
+        /// <c>SnapshotReceived</c> callback as <c>ResolvedSnapshot.Events</c>, and this package
+        /// deliberately does not reach for the session: it is handed an <c>IEntityView</c> and owns
+        /// nothing above it. One line in the consumer's bootstrap connects them.
+        /// </para>
+        /// <para>
+        /// <b>Call it once per snapshot.</b> Events are not state and are never re-sent; calling it
+        /// twice with the same list shows a player a hit that happened twice.
+        /// </para>
+        /// </remarks>
+        public void EnqueueGameEvents(IReadOnlyList<ResolvedGameEvent> events)
+        {
+            if (events == null) return;
+
+            for (var i = 0; i < events.Count; i++)
+            {
+                var e = events[i];
+
+                var pending = new PendingNetworkGameEvent
+                {
+                    Type = e.Type,
+                    Amount = e.Amount,
+                    AbilityId = e.AbilityId,
+                    Flags = e.Flags,
+                };
+
+                // A participant whose id does not fit is carried with an EMPTY id rather than
+                // dropped: the event still has a magnitude and a type, and an id this view cannot
+                // represent is the same situation as one the server did not send.
+                if (!string.IsNullOrEmpty(e.SourceId)) pending.SourceId.CopyFromTruncated(e.SourceId);
+                if (!string.IsNullOrEmpty(e.TargetId)) pending.TargetId.CopyFromTruncated(e.TargetId);
+
+                if (_events.Count >= MaxQueuedEvents)
+                {
+                    if (_events.TryDequeue(out _)) Interlocked.Increment(ref _eventsDropped);
+                }
+
+                _events.Enqueue(pending);
+            }
+        }
+
+        /// <summary>Takes the next queued event, or false when there are none. Drain system only.</summary>
+        public bool TryDequeueGameEvent(out PendingNetworkGameEvent pending) => _events.TryDequeue(out pending);
 
         /// <summary>
         /// Takes the next queued command. Called by the drain system, and by tests that want to

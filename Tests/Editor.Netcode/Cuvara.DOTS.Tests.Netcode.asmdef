@@ -6,6 +6,7 @@
         "UnityEditor.TestRunner",
         "Cuvara.DOTS.Runtime",
         "Cuvara.DOTS.Netcode",
+        "Shared.GameLogic",
         "Cuvara.Netcode.Runtime",
         "Unity.Entities",
         "Unity.Burst",
@@ -30,7 +31,7 @@
     "versionDefines": [
         {
             "name": "com.cuvara.netcode",
-            "expression": "0.31.0",
+            "expression": "0.40.0",
             "define": "CUVARA_NETCODE"
         }
     ],

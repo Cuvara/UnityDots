@@ -1,0 +1,135 @@
+/* Shared styling for the four Phase B showcase panels.
+   Dark, compact and fixed to the left edge, so the 3D scene behind stays visible. */
+
+.screen {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+}
+
+.hud {
+    position: absolute;
+    left: 12px;
+    top: 12px;
+    width: 470px;
+    max-height: 96%;
+    background-color: rgba(18, 20, 26, 0.86);
+    border-radius: 8px;
+    padding: 10px;
+}
+
+.content {
+    flex-grow: 1;
+}
+
+.title {
+    font-size: 16px;
+    -unity-font-style: bold;
+    color: rgb(240, 240, 240);
+    margin-bottom: 6px;
+}
+
+.section {
+    font-size: 12px;
+    -unity-font-style: bold;
+    color: rgb(200, 200, 210);
+    margin-top: 8px;
+    margin-bottom: 2px;
+}
+
+.row {
+    flex-direction: row;
+    flex-wrap: wrap;
+}
+
+.row > Button {
+    margin: 2px;
+    padding: 3px 8px;
+    font-size: 11px;
+}
+
+/* white-space: normal on every text sink: the counters and logs are wide, and the
+   default nowrap would push their right-hand columns out of the panel unread. */
+.mono {
+    font-size: 11px;
+    color: rgb(225, 225, 230);
+    white-space: normal;
+    margin-top: 6px;
+}
+
+.log {
+    font-size: 11px;
+    color: rgb(180, 220, 180);
+    white-space: normal;
+    margin-top: 6px;
+}
+
+.report {
+    font-size: 11px;
+    color: rgb(240, 200, 150);
+    white-space: normal;
+    margin-top: 6px;
+}
+
+/* Name plates, positioned from code in panel coordinates. */
+.plates {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+}
+
+.plate {
+    position: absolute;
+    font-size: 11px;
+    color: rgb(255, 255, 255);
+    background-color: rgba(0, 0, 0, 0.55);
+    padding: 1px 4px;
+    border-radius: 3px;
+}
+
+.minimap {
+    position: absolute;
+    right: 12px;
+    top: 12px;
+    width: 180px;
+    height: 180px;
+    background-color: rgba(18, 20, 26, 0.86);
+    border-width: 1px;
+    border-color: rgb(120, 120, 130);
+    border-radius: 6px;
+}
+
+.dot {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    border-radius: 4px;
+    background-color: rgb(160, 160, 160);
+}
+
+.dot-player {
+    background-color: rgb(70, 150, 230);
+}
+
+.dot-mob {
+    background-color: rgb(220, 90, 60);
+}
+
+.dot-local {
+    background-color: rgb(255, 215, 50);
+    width: 10px;
+    height: 10px;
+    border-radius: 5px;
+}
+
+.minimap-title {
+    position: absolute;
+    right: 16px;
+    top: 196px;
+    font-size: 11px;
+    color: rgb(200, 200, 210);
+}
