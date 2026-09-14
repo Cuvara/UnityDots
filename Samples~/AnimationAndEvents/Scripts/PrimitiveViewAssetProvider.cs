@@ -117,6 +117,28 @@ namespace Cuvara.DOTS.Samples.AnimationAndEvents
             return Task.CompletedTask;
         }
 
+        /// <summary>
+        /// A material that survives a BUILD, not only the Editor.
+        /// </summary>
+        /// <remarks>
+        /// <c>GameObject.CreatePrimitive</c> assigns the built-in default material, whose
+        /// shader is not included in a URP player — so the primitives rendered MAGENTA in a
+        /// build while looking correct in the Editor, which is the shape of bug a scene test
+        /// cannot see because nothing throws. <c>Sprites/Default</c> is the last entry
+        /// because Unity always includes it; the URP ones are tried first so the sample
+        /// looks like the rest of the project where they are present.
+        /// </remarks>
+        private static Material MakeMaterial(Color colour)
+        {
+            var shader = Shader.Find("Universal Render Pipeline/Unlit")
+                         ?? Shader.Find("Unlit/Color")
+                         ?? Shader.Find("Sprites/Default");
+
+            var material = new Material(shader) { color = colour };
+            if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", colour);
+            return material;
+        }
+
         public bool IsWarm(string key) => key != null && _warm.Contains(key);
 
         public GameObject Acquire(string key, Vector3 position, Quaternion rotation, Transform parent = null)
@@ -245,7 +267,7 @@ namespace Cuvara.DOTS.Samples.AnimationAndEvents
                 if (collider != null) UnityEngine.Object.Destroy(collider);
 
                 var renderer = instance.GetComponent<Renderer>();
-                if (renderer != null) renderer.material.color = definition.Color;
+                if (renderer != null) renderer.material = MakeMaterial(definition.Color);
             }
 
             instance.name = $"{key}#{InstantiateCount}";

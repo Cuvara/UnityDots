@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`Samples~/AnimationAndEvents` looked broken in a BUILD while working in the Editor.** Two
+  defects, both found by looking at a screenshot of the built player rather than at a test
+  result — neither throws, so nothing in the suite could have caught either.
+
+  - **Magenta capsules.** `GameObject.CreatePrimitive` assigns the built-in default material,
+    whose shader is not included in a URP player. The provider now builds its own material from
+    a fallback chain ending in `Sprites/Default`, which Unity always includes.
+  - **Unstyled UI.** The UXML linked its stylesheet correctly and then used class names from a
+    different one, so every element rendered with no styling. The sibling showcase files carry a
+    comment warning about the near-miss version of this (a UXML with no `Style` element at all);
+    this is the same failure reached from the other side, and the comment now says so.
+
 ## [0.30.0]
 
 ### Added
