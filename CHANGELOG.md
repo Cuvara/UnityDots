@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **CI pins moved together: `com.cuvara.netcode` v0.31.0 → v0.41.0 and
+  `com.rpgmmo.shared-gamelogic` sgl-v0.3.0 → sgl-v0.5.0** (five pins across three
+  generated manifests). `EntityPoseAndEventTests` uses `ResolvedGameEvent` and friends,
+  which do not exist before netcode v0.41.0 — every test row failed with no
+  `ScriptAssemblies` directory at all, which reads as a broken harness rather than a
+  missing dependency.
+
+  Both pins move in the same commit deliberately. This file's own header comments record
+  the last time they did not: a manifest on `sgl-v0.1.6` while the feature it needed
+  shipped in `sgl-v0.1.8`, and the failure surfaced inside `com.cuvara.netcode` rather
+  than pointing at the pin. netcode v0.41.0 requires sgl-v0.5.0.
+
+
 ### Fixed
 - **`Samples~/AnimationAndEvents` looked broken in a BUILD while working in the Editor.** Two
   defects, both found by looking at a screenshot of the built player rather than at a test
