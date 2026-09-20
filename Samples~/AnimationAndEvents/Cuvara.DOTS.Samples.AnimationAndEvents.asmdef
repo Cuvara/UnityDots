@@ -1,12 +1,12 @@
 {
-    "name": "Cuvara.DOTS.Netcode",
-    "rootNamespace": "Cuvara.DOTS.Netcode",
+    "name": "Cuvara.DOTS.Samples.AnimationAndEvents",
+    "rootNamespace": "Cuvara.DOTS.Samples.AnimationAndEvents",
     "references": [
         "Cuvara.DOTS.Runtime",
+        "Cuvara.DOTS.Netcode",
         "Cuvara.Netcode.Runtime",
         "Shared.GameLogic",
         "Unity.Entities",
-        "Unity.Burst",
         "Unity.Collections",
         "Unity.Mathematics",
         "Unity.Transforms"

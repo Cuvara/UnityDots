@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **CI pins moved together: `com.cuvara.netcode` v0.31.0 → v0.41.0 and
+  `com.rpgmmo.shared-gamelogic` sgl-v0.3.0 → sgl-v0.5.0** (five pins across three
+  generated manifests). `EntityPoseAndEventTests` uses `ResolvedGameEvent` and friends,
+  which do not exist before netcode v0.41.0 — every test row failed with no
+  `ScriptAssemblies` directory at all, which reads as a broken harness rather than a
+  missing dependency.
+
+  Both pins move in the same commit deliberately. This file's own header comments record
+  the last time they did not: a manifest on `sgl-v0.1.6` while the feature it needed
+  shipped in `sgl-v0.1.8`, and the failure surfaced inside `com.cuvara.netcode` rather
+  than pointing at the pin. netcode v0.41.0 requires sgl-v0.5.0.
+
+
+### Fixed
+- **`Samples~/AnimationAndEvents` looked broken in a BUILD while working in the Editor.** Two
+  defects, both found by looking at a screenshot of the built player rather than at a test
+  result — neither throws, so nothing in the suite could have caught either.
+
+  - **Magenta capsules.** `GameObject.CreatePrimitive` assigns the built-in default material,
+    whose shader is not included in a URP player. The provider now builds its own material from
+    a fallback chain ending in `Sprites/Default`, which Unity always includes.
+  - **Unstyled UI.** The UXML linked its stylesheet correctly and then used class names from a
+    different one, so every element rendered with no styling. The sibling showcase files carry a
+    comment warning about the near-miss version of this (a UXML with no `Style` element at all);
+    this is the same failure reached from the other side, and the comment now says so.
+
+## [0.30.0]
+
+### Added
+- **Entity pose over the netcode adapter.** `DotsEntityView` now implements
+  `IEntityPoseView`, and the drain writes `EntityPose` — facing, action, and the retrigger
+  counter. **Before this the DOTS path received no facing and no action at all**: the adapter
+  implemented `IEntityView` only, so the binder's `SetPose` was never called and a DOTS client
+  could not turn a character or animate one. That was not a documented limitation anywhere; it
+  was simply absent.
+- **`IEntityAnimationReceiver` + `EntityPoseViewSystem`** — the animation seam. The package
+  owns the one fact a client cannot derive (the server says this entity ENTERED an action) and
+  the two rules that are easy to get wrong in isolation: the retrigger comparison is
+  **inequality**, not greater-than (the counter wraps and resets, so `>` stops retriggering for
+  four billion actions after one wrap), and the memory of what was last shown lives on the
+  ENTITY, not on the pooled GameObject that happens to be drawing it — a recycled view would
+  compare a new entity's first swing against the previous entity's counter. The interface
+  therefore takes a `bool`, not a `uint`. It owns no Animator and no trigger names.
+- **`NetworkGameEvent` buffer** on the view singleton, holding one frame of events and cleared
+  every drain. Participants are resolved to mirrors where this client has one and left
+  `Entity.Null` otherwise — outside the AOI, no mirror yet, or no participant sent — with the id
+  still carried. `DotsEntityView.EnqueueGameEvents` is the host's one-line seam; the package
+  does not reach for the session, because it is handed an `IEntityView` and owns nothing above
+  it. Bounded at `MaxQueuedEvents`, dropping the oldest.
+- **`Samples~/AnimationAndEvents`** — offline scene where both features can be switched off
+  and the consequence watched.
+
+### Changed
+- **`Cuvara.DOTS.Netcode` references `Shared.GameLogic`.** Safe because `com.cuvara.netcode`
+  itself has no configuration in which it compiles without it, so `CUVARA_NETCODE` already
+  implies it. The core assembly's four-dependency rule is untouched.
+- **`EntityPoseViewSystem` and `IEntityAnimationReceiver` live in `Runtime.Netcode`, not
+  `Runtime/Views`.** They were written into the core assembly first, which compiled cleanly in
+  a plain csproj and failed in Unity — the standalone-install rule is enforced by the asmdef
+  graph and by nothing else, and no non-Unity build models it.
+
+### Fixed
+- **`ROADMAP.md` had been stale for two releases.** Its `CameraFollowSystem` row still read
+  "no installer, untested" after `CameraFollowBootstrap` shipped in 0.28.0 with tests, so the
+  camera installer was read as a gap and planned against a third time. The row is corrected and
+  the staleness is recorded in the file rather than quietly removed — a roadmap that describes
+  an older version than the tree is exactly what its own header promises it is not.
+
+### Requires
+- `com.cuvara.netcode` **≥ 0.40.0** for `IEntityPoseView.SetPose`'s fourth parameter and
+  `ResolvedGameEvent`. Building against 0.39.x fails to compile rather than silently losing the
+  counter, which is the right failure.
 ### Fixed
 
 - **CI: pinned `game-ci/unity-test-runner` to `v4.3.1`.** Every Unity Tests row had been
@@ -29,6 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which is green today — but it contains exactly one job, `Warn if package.json version is
   untagged`. It never ran Unity at all. A green re-run is only a control if it exercised the
   thing under test.
+
 
 
 ## [0.29.0] - 2026-09-07

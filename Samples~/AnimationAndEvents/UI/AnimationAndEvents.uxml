@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<engine:UXML
+    xmlns:engine="UnityEngine.UIElements"
+    xmlns:editor="UnityEditor.UIElements"
+    xsi="http://www.w3.org/2001/XMLSchema-instance"
+    engine="UnityEngine.UIElements"
+    noNamespaceSchemaLocation="../../../UIElementsSchema/UIElements.xsd">
+
+    <!-- The stylesheet has to be linked here AND the class names have to exist in it. The
+         first version of this file linked the sheet correctly and then used class names
+         from a different one: every element rendered, unstyled, and the scene "worked"
+         while looking broken. That is harder to diagnose than a hard failure, which is why
+         the sibling showcase files carry the same warning. -->
+    <engine:Style src="AnimationAndEvents.uss" />
+
+    <engine:VisualElement name="screen" class="screen" picking-mode="Ignore">
+        <engine:VisualElement name="hud" class="hud">
+
+            <engine:Label class="title" text="Animation and events" />
+            <engine:ScrollView name="content" class="content">
+
+                <engine:Label class="section" text="Pose" />
+                <engine:Label name="pose-line" class="mono" />
+                <engine:Label name="swing-line" class="report" />
+                <engine:VisualElement class="row">
+                    <engine:Button name="toggle-seq" text="Stop sending action_seq" />
+                </engine:VisualElement>
+
+                <engine:Label class="section" text="Events" />
+                <engine:Label name="hp-line" class="mono" />
+                <engine:Label name="event-line" class="log" />
+                <engine:VisualElement class="row">
+                    <engine:Button name="toggle-events" text="Stop sending events" />
+                </engine:VisualElement>
+
+            </engine:ScrollView>
+        </engine:VisualElement>
+    </engine:VisualElement>
+</engine:UXML>

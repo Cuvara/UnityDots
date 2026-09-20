@@ -18,7 +18,7 @@ sample-only / data-contract-only / planned, and records what CI actually tests.
 | Path | Assembly | Gate | Purpose | Status |
 |---|---|---|---|---|
 | `Runtime/` | `Cuvara.DOTS.Runtime` | none | View link + registry + systems, view config as data, provisioning seam and `PooledViewAssetProvider`, simulation systems, group tree, module records, messaging seam, overlay feed + consumer helpers, minimap module, camera follow | core; see matrix per feature |
-| `Runtime.Netcode/` | `Cuvara.DOTS.Netcode` | `CUVARA_NETCODE` — `com.cuvara.netcode` **≥ 0.31.0** | `IEntityView` over ECS, remote interpolation, network lifecycle events | implemented, in client |
+| `Runtime.Netcode/` | `Cuvara.DOTS.Netcode` | `CUVARA_NETCODE` — `com.cuvara.netcode` **≥ 0.40.0** | `IEntityView` **and `IEntityPoseView`** over ECS, remote interpolation, network lifecycle events, `EntityPose`, the `NetworkGameEvent` buffer, and the `IEntityAnimationReceiver` seam | implemented, in client |
 | `Runtime.Netcode.Prediction/` | `Cuvara.DOTS.Netcode.Prediction` | `CUVARA_NETCODE` + `CUVARA_SHARED_GAMELOGIC` | Client-side prediction driver | implemented, in client |
 | `Runtime.GameLogic/` | `Cuvara.DOTS.GameLogic` | `CUVARA_SHARED_GAMELOGIC` | `ISimulationModel` over `Shared.GameLogic` | implemented, in client |
 | `Runtime.DI/` | `Cuvara.DOTS.DI` | `CUVARA_DOTS_VCONTAINER` (+ optional `CUVARA_DOTS_MESSAGEPIPE`, `CUVARA_NETCODE`) | `RegisterDotsViews`, `RegisterDotsMessaging`, `RegisterSimulationModel`, `RegisterDotsNetworkLifecycle` | compile-checked only |
@@ -37,7 +37,7 @@ exists to prove it. The dependency arrow between this package and `com.cuvara.ne
 
 ## Netcode adapter
 
-With `com.cuvara.netcode` ≥ 0.31.0 installed, `Cuvara.DOTS.Netcode` supplies a
+With `com.cuvara.netcode` ≥ 0.40.0 installed, `Cuvara.DOTS.Netcode` supplies a
 `Cuvara.Netcode.View.IEntityView` that presents replicated entities as ECS entities driven through
 this package's own view pipeline.
 
@@ -221,7 +221,7 @@ Or **Window › Package Manager › + › Add package from git URL**:
 `https://github.com/Cuvara/UnityDots.git#v0.27.1`.
 
 Optional packages are resolved by *your* manifest, not by this package's `package.json`:
-`com.cuvara.netcode` (`https://github.com/Cuvara/Netcode.git#v0.31.0`),
+`com.cuvara.netcode` (`https://github.com/Cuvara/Netcode.git#v0.40.0`),
 `com.rpgmmo.shared-gamelogic` (`https://github.com/Cuvara/rpg-mmo-server.git?path=/backend/gameserver-dotnet/Shared.GameLogic#sgl-v0.3.0`),
 VContainer, MessagePipe, UniT, `com.unity.physics`.
 
@@ -254,7 +254,7 @@ each asserting a **test-count floor per assembly** (a green run over zero tests 
 |---|---|---|
 | no optional packages | — | all three must be absent |
 | netcode absent | `sgl-v0.3.0` | GameLogic ≥ 41; Netcode/Prediction absent |
-| netcode present | `com.cuvara.netcode#v0.31.0`, `sgl-v0.3.0`, OpenUPM scope | Netcode ≥ 47, Prediction ≥ 19, GameLogic ≥ 41 |
+| netcode present | `com.cuvara.netcode#v0.40.0`, `sgl-v0.3.0`, OpenUPM scope | Netcode ≥ 47, Prediction ≥ 19, GameLogic ≥ 41 |
 
 Not covered by any row: `Cuvara.DOTS.DI`, `Cuvara.DOTS.GameFoundation`, `Cuvara.DOTS.Physics`,
 `Cuvara.DOTS.Editor`, Android/IL2CPP, WebGL. There are **no measured performance figures** in this
@@ -299,7 +299,7 @@ Optional, resolved by your project:
 
 | Package | Enables | Define |
 |---|---|---|
-| `com.cuvara.netcode` **≥ 0.31.0** | `Cuvara.DOTS.Netcode` (+ `.Prediction` with shared-gamelogic) | `CUVARA_NETCODE` |
+| `com.cuvara.netcode` **≥ 0.40.0** | `Cuvara.DOTS.Netcode` (+ `.Prediction` with shared-gamelogic) | `CUVARA_NETCODE` |
 | `com.rpgmmo.shared-gamelogic` | `Cuvara.DOTS.GameLogic`, `Cuvara.DOTS.Netcode.Prediction` | `CUVARA_SHARED_GAMELOGIC` |
 | `jp.hadashikick.vcontainer` | `Cuvara.DOTS.DI` | `CUVARA_DOTS_VCONTAINER` |
 | `com.cysharp.messagepipe` | MessagePipe forwarding inside `Cuvara.DOTS.DI` | `CUVARA_DOTS_MESSAGEPIPE` |

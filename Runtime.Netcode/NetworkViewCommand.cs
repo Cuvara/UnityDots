@@ -15,6 +15,14 @@ namespace Cuvara.DOTS.Netcode
         /// Enqueued by <see cref="DotsEntityView.BeginGeneration"/>, never by an <c>IEntityView</c> call.
         /// </summary>
         Reset = 3,
+
+        /// <summary>
+        /// Facing, action and retrigger counter for an already-spawned entity. Enqueued by
+        /// <c>IEntityPoseView.SetPose</c>, which the binder calls immediately after the matching
+        /// <c>SetState</c> — so a Pose always follows its State in this queue, and a view that
+        /// wants both can treat the pair as one update.
+        /// </summary>
+        Pose = 4,
     }
 
     /// <summary>
@@ -106,6 +114,23 @@ namespace Cuvara.DOTS.Netcode
         /// </para>
         /// </remarks>
         public long Tick;
+
+        /// <summary>Facing in the wire's biased form, 0 for "not sent". Pose only.</summary>
+        public uint FacingBrad;
+
+        /// <summary>What the entity is doing, 0 for "not sent". Pose only.</summary>
+        public Shared.GameLogic.Components.EntityAction Action;
+
+        /// <summary>
+        /// Retrigger counter for <see cref="Action"/>, 0 for "not sent". Pose only.
+        /// </summary>
+        /// <remarks>
+        /// Carried on the command rather than derived at drain time for the reason the whole
+        /// queue exists: the enqueue happens on the network thread and the drain happens on the
+        /// main thread a variable number of frames later, so anything the drain re-derives is
+        /// derived from a world that has moved on.
+        /// </remarks>
+        public uint ActionSeq;
 
         /// <summary>
         /// Seconds on the caller's monotonic clock when this state was received. State only, and
