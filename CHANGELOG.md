@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **CI: pinned `game-ci/unity-test-runner` to `v4.3.1`.** Every Unity Tests row had been
+  failing with `[ERROR] Error: fatal: not a git repository (or any of the parent
+  directories): .git` — `game-ci test` exited before Unity ran, so there was no
+  `Library/ScriptAssemblies` and every downstream assertion ("`Cuvara.DOTS.Runtime` is
+  absent, expected present", "NO test assemblies ran at all") fired as a consequence rather
+  than a cause.
+
+  The workflow used the floating `@v4` tag. **`v4.4.0` was published 2026-09-09**, two days
+  after this repo's last green run, and it delegates to `game-ci/cli` — which is the thing
+  that requires a git repository in its working directory. Nothing in this repo changed;
+  the action moved underneath it.
+
+  Confirmed by re-running the last genuinely green `main` run (34150357462, 2026-09-07)
+  today: all six Unity Tests jobs **fail**, with the identical error. The commit is
+  unchanged, so the difference is entirely the action version.
+
+  Note for whoever revisits this: an earlier attempt at that control used run 34150357537,
+  which is green today — but it contains exactly one job, `Warn if package.json version is
+  untagged`. It never ran Unity at all. A green re-run is only a control if it exercised the
+  thing under test.
+
+
 ## [0.29.0] - 2026-09-07
 
 ### Added
