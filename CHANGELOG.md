@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **CI: the netcode-present, full-stack and netcode-absent rows now test against the peers the game
+  ships** - `com.cuvara.netcode` `v0.41.0` -> `v0.45.0` and `com.rpgmmo.shared-gamelogic`
+  `sgl-v0.5.0` -> `sgl-v0.6.0`, the pins in `IndieRPGMMOAdventure`'s `packages-lock.json`. The pins are
+  part of the configuration under test (see the comment above them in `ci.yml`); stale ones validated
+  a combination nobody uses. Compatibility checked before the bump: netcode 0.41 -> 0.45 has no
+  breaking change ("nothing removed"), and sgl-v0.6.0's one breaking change (the ten-argument
+  positional `EntitySnapshotData` constructor, rpg-mmo-server #388) has no caller here; netcode's only
+  call site passes `actionSeq:`/`changedFields:` by name. The compatibility tables in `README.md` and
+  `Documentation~/SUPPORT-MATRIX.md` record verified runs and are updated after this CI run is green.
+
 - **CI pins moved together: `com.cuvara.netcode` v0.31.0 → v0.41.0 and
   `com.rpgmmo.shared-gamelogic` sgl-v0.3.0 → sgl-v0.5.0** (five pins across three
   generated manifests). `EntityPoseAndEventTests` uses `ResolvedGameEvent` and friends,
