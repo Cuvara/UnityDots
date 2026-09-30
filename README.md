@@ -221,8 +221,8 @@ Or **Window › Package Manager › + › Add package from git URL**:
 `https://github.com/Cuvara/UnityDots.git#v0.27.1`.
 
 Optional packages are resolved by *your* manifest, not by this package's `package.json`:
-`com.cuvara.netcode` (`https://github.com/Cuvara/Netcode.git#v0.40.0`),
-`com.rpgmmo.shared-gamelogic` (`https://github.com/Cuvara/rpg-mmo-server.git?path=/backend/gameserver-dotnet/Shared.GameLogic#sgl-v0.3.0`),
+`com.cuvara.netcode` (`https://github.com/Cuvara/Netcode.git#v0.45.0`),
+`com.rpgmmo.shared-gamelogic` (`https://github.com/Cuvara/rpg-mmo-server.git?path=/backend/gameserver-dotnet/Shared.GameLogic#sgl-v0.6.0`),
 VContainer, MessagePipe, UniT, `com.unity.physics`.
 
 ### Embedded
@@ -253,8 +253,8 @@ each asserting a **test-count floor per assembly** (a green run over zero tests 
 | Row | Extra packages | Netcode/Prediction/GameLogic test assemblies |
 |---|---|---|
 | no optional packages | — | all three must be absent |
-| netcode absent | `sgl-v0.3.0` | GameLogic ≥ 41; Netcode/Prediction absent |
-| netcode present | `com.cuvara.netcode#v0.40.0`, `sgl-v0.3.0`, OpenUPM scope | Netcode ≥ 47, Prediction ≥ 19, GameLogic ≥ 41 |
+| netcode absent | `sgl-v0.6.0` | GameLogic ≥ 41; Netcode/Prediction absent |
+| netcode present | `com.cuvara.netcode#v0.45.0`, `sgl-v0.6.0`, OpenUPM scope | Netcode ≥ 47, Prediction ≥ 19, GameLogic ≥ 41 |
 
 Not covered by any row: `Cuvara.DOTS.DI`, `Cuvara.DOTS.GameFoundation`, `Cuvara.DOTS.Physics`,
 `Cuvara.DOTS.Editor`, Android/IL2CPP, WebGL. There are **no measured performance figures** in this

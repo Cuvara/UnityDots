@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   positional `EntitySnapshotData` constructor, rpg-mmo-server #388) has no caller here; netcode's only
   call site passes `actionSeq:`/`changedFields:` by name. The compatibility tables in `README.md` and
   `Documentation~/SUPPORT-MATRIX.md` record verified runs and are updated after this CI run is green.
+- **README "Tested configurations" and the optional-package install line now name the pins CI verifies**:
+  `com.cuvara.netcode#v0.45.0` and `sgl-v0.6.0` (all six rows green on #33, full-stack run 36724841010
+  attempt 2). `Documentation~/SUPPORT-MATRIX.md` is a dated snapshot of the source and is left as is.
 
 - **CI pins moved together: `com.cuvara.netcode` v0.31.0 → v0.41.0 and
   `com.rpgmmo.shared-gamelogic` sgl-v0.3.0 → sgl-v0.5.0** (five pins across three
