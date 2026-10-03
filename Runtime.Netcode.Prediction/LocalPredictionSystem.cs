@@ -148,6 +148,7 @@ namespace Cuvara.DOTS.Netcode.Prediction
                 {
                     _lastAckTick = ackTick;
                     _lastAnchorSequence = anchor.Sequence;
+                    bool reconciled = false;
 
                     // Speed first, then position — the same order WorldViewBinder uses on the
                     // GameObject path, and the order matters: Reconcile replays every
@@ -187,10 +188,27 @@ namespace Cuvara.DOTS.Netcode.Prediction
                         if (reference.World.TryGet(wireId, out var snapshot))
                         {
                             predictor.SetServerSpeed(snapshot.Speed);
+
+                            // Protocol 3 (ADR-28): a predictor running the 3D motor must be
+                            // corrected in height too, or a missed landing or a server-side
+                            // step-up is never repaired and the local player floats or sinks
+                            // for the rest of the session. The anchor carries only the ground
+                            // plane, so height and vertical velocity come from the same
+                            // WorldState entry the speed does.
+                            if (predictor.UsesCharacterMotor)
+                            {
+                                predictor.Reconcile(
+                                    new Vec3(anchor.ServerPosition.x, anchor.ServerPosition.y, snapshot.Z),
+                                    snapshot.VelZ, ackTick);
+                                reconciled = true;
+                            }
                         }
                     }
 
-                    predictor.Reconcile(ToVec2(anchor.ServerPosition), ackTick);
+                    if (!reconciled)
+                    {
+                        predictor.Reconcile(ToVec2(anchor.ServerPosition), ackTick);
+                    }
                 }
 
                 predictor.Advance(SystemAPI.Time.DeltaTime);

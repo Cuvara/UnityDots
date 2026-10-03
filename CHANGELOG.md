@@ -7,8 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The local player's height is reconciled on a protocol 3 server** (ADR-28).
+  `LocalPredictionSystem` reconciled only the ground plane, so a predictor running netcode's
+  3D `CharacterMotor` never had its height or vertical velocity corrected: a missed landing or a
+  server-side step-up stayed wrong for the session. When the predictor uses the motor, the
+  system now reconciles with the snapshot's `z` and `vel_z` through netcode's
+  `LocalMovePredictor.Reconcile(Vec3, float, long)`. Protocol 2 servers take the unchanged
+  two-dimensional path.
+
 ### Changed
 
+- **CI and README peer pins move to `com.cuvara.netcode#v0.46.0` and `sgl-v0.7.0`** (wire
+  protocol 3). Both tags are created by a human; CI fails until they exist.
 - **CI: the netcode-present, full-stack and netcode-absent rows now test against the peers the game
   ships** - `com.cuvara.netcode` `v0.41.0` -> `v0.45.0` and `com.rpgmmo.shared-gamelogic`
   `sgl-v0.5.0` -> `sgl-v0.6.0`, the pins in `IndieRPGMMOAdventure`'s `packages-lock.json`. The pins are
