@@ -50,6 +50,7 @@ namespace Cuvara.DOTS.Netcode.Prediction
                 {
                     Predictor = predictor,
                     World = worldState,
+                    Steering = new PredictionClockSteering(predictor),
                 });
 #if UNITY_EDITOR
                 entityManager.SetName(entity, "LocalPrediction");
@@ -59,12 +60,58 @@ namespace Cuvara.DOTS.Netcode.Prediction
             {
                 entity = query.GetSingletonEntity();
                 var existing = entityManager.GetComponentObject<LocalPredictionReference>(entity);
+                // Measurements describe one predictor's clock against one route: a different
+                // predictor starts from fresh ones, the same predictor keeps what it has learned.
+                if (!ReferenceEquals(existing.Predictor, predictor) || existing.Steering == null)
+                {
+                    existing.Steering = new PredictionClockSteering(predictor);
+                }
+
                 existing.Predictor = predictor;
                 existing.World = worldState;
             }
 
             InstallSystems(world);
             return entity;
+        }
+
+        /// <summary>
+        /// Reports that an input has just been sent, so the clock steering can time its
+        /// acknowledgement. Call it beside <c>LocalMovePredictor.RecordInput</c>, with the same tick.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Optional, and worth calling. Without it the steering never measures the acknowledgement
+        /// floor -- the part of <c>uplink + snapshot age</c> no arrival-time measurement can see --
+        /// and the target lead falls back to half the round trip. The time is stamped from this
+        /// world's own clock (<c>World.Time.ElapsedTime</c>), the one <c>LocalPredictionSystem</c>
+        /// measures snapshots and advances the predictor with, so both ends of the measurement come
+        /// from one clock.
+        /// </para>
+        /// <para>Does nothing when prediction is not installed in <paramref name="world"/>.</para>
+        /// </remarks>
+        public static void NoteInputSent(Unity.Entities.World world, long inputTick)
+        {
+            if (!TryGetClockSteering(world, out var steering)) return;
+            steering.NoteInputSent(inputTick, world.Time.ElapsedTime);
+        }
+
+        /// <summary>
+        /// The clock steering of the prediction installed in <paramref name="world"/>, for a consumer
+        /// that wants to set <c>RoundTripMs</c> or read the measurements. False when none is
+        /// installed.
+        /// </summary>
+        public static bool TryGetClockSteering(Unity.Entities.World world, out PredictionClockSteering steering)
+        {
+            steering = null;
+            if (world == null || !world.IsCreated) return false;
+
+            var entityManager = world.EntityManager;
+            using var query = entityManager.CreateEntityQuery(ComponentType.ReadOnly<LocalPredictionReference>());
+            if (query.IsEmpty) return false;
+
+            steering = entityManager.GetComponentObject<LocalPredictionReference>(query.GetSingletonEntity()).Steering;
+            return steering != null;
         }
 
         /// <summary>Creates the driving system under <see cref="PredictionSystemGroup"/>.</summary>

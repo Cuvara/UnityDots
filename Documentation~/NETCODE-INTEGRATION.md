@@ -90,17 +90,29 @@ the wire and nothing else. Nothing predicted or rendered ever reaches it.
 - The adapter writes only `ReconciliationAnchor` (authoritative position); the
   prediction system claims `LocalTransform` by adding `PredictedTransform`.
 - Remote interpolation excludes entities with `PredictedTransform` (`WithNone`).
-- **Reconciliation inputs**: `anchor.ServerPosition` (the wire's own coordinates,
-  unmapped), `WorldState.AckTick` (the tick), and the entity's wire speed via
-  `SetServerSpeed` — in that order, before each reconcile.
-- **When it reconciles**: only when `AckTick` advanced *and* `anchor.Sequence` changed
-  since the last reconcile and is non-zero. An ack that outran the drain (the binder
-  merged a newer snapshot after this frame's `SnapshotApplyGroup`) waits one frame
-  instead of pairing the new tick with the previous position; the spawn placeholder
-  (`Sequence == 0`, `ServerPosition == float2.zero` because the server has said
-  nothing) is never rewound to.
-- **Reconnect**: the system's ack/anchor memory resets when `DotsEntityView.Generation`
-  changes, so a new server whose ticks are lower still reconciles. Resetting the
+- **Reconciliation inputs** (once per merged snapshot, i.e. whenever `WorldState.Tick`
+  advanced): the local entity's `WorldState` entry (`X`, `Y`, and under the 3D motor `Z` and
+  `VelZ` - the wire's own coordinates, the same floats `anchor.ServerPosition` holds),
+  `WorldState.Tick`, `WorldState.AckTick` and `WorldState.AckAppliedTick`, all from that one
+  snapshot. Order: `SetServerSpeed`, then the clock (`PredictionClockSteering.SampleTickRate` +
+  `OnSnapshot`: seed, measure, feed a corroborated rate forward, steer the phase), then
+  `Reconcile(position, ack, tick, ackAppliedTick)`. The predictor compares against its history at
+  the entry the snapshot describes (netcode `Documentation~/PREDICTION.md`, *ack_applied_tick*);
+  a protocol 2 server sends no `ack_applied_tick` and the comparison is at the snapshot tick, as
+  before. Before 0.31.0 this system reconciled through the two-argument overload and never steered
+  the clock, which ran 22-23 ticks ahead of a 0.7%-slow server over 55 s.
+- **Clock steering**: `LocalPredictionReference.Steering` (created by `Install`). Report each input
+  send with `DotsPredictionBootstrap.NoteInputSent(world, inputTick)` beside `RecordInput`, or the
+  acknowledgement floor is never measured; `TryGetClockSteering` exposes it to set `RoundTripMs`.
+  Time is the DOTS world's `Time.ElapsedTime`, the clock `Advance` is fed from.
+- **Fallback**: when the local entity is not in `WorldState` (a view fed by something other than
+  the binder), the previous rule applies - reconcile through `Reconcile(anchor.ServerPosition,
+  AckTick)` only when `AckTick` advanced *and* `anchor.Sequence` changed since the last reconcile
+  and is non-zero, so an ack that outran the drain waits one frame and the spawn placeholder
+  (`Sequence == 0`) is never rewound to.
+- **Reconnect**: the system's ack/anchor/world-tick memory and the clock measurements reset when
+  `DotsEntityView.Generation` changes or `WorldState.Tick` goes backwards, so a new server whose
+  ticks are lower still reconciles. Resetting the
   predictor itself (`LocalMovePredictor.Reset()`) remains the host's call, alongside
   `WorldState.Reset()` and `view.BeginGeneration()`.
 - Toggling: `DotsPredictionBootstrap.Uninstall` removes `PredictedTransform`, so the

@@ -8,26 +8,37 @@ using Unity.Transforms;
 namespace Cuvara.DOTS.Netcode.Prediction
 {
     /// <summary>
-    /// Drives <c>LocalMovePredictor</c> from ECS: reconciles it against the local entity's
-    /// <see cref="ReconciliationAnchor"/>, advances it, and writes the result to
-    /// <c>LocalTransform</c>.
+    /// Drives <c>LocalMovePredictor</c> from ECS: steers its clock and reconciles it once per merged
+    /// snapshot, advances it every frame, and writes the result to <c>LocalTransform</c>.
     /// </summary>
     /// <remarks>
     /// <para>
     /// <b>The DOTS half of the seam, and only that half.</b> The predictor owns the algorithm — the
-    /// input buffer, the replay through <c>TryMove</c>, the smoothing. This system owns reading the
-    /// anchor, supplying the tick, claiming and releasing <see cref="PredictedTransform"/>, and
-    /// writing the transform. It lives here rather than in netcode because the alternative is
+    /// input buffer, the history, the replay through <c>TryMove</c>, the smoothing; netcode's
+    /// <c>PredictionClockSteering</c> owns keeping its clock on the server's. This system owns
+    /// feeding both from the merged snapshot, claiming and releasing
+    /// <see cref="PredictedTransform"/>, and writing the transform. It lives here rather than in netcode because the alternative is
     /// netcode taking a dependency on Entities, and the arrow between these packages is one-way.
     /// </para>
     /// <para>
-    /// <b>It reconciles from <c>ServerPosition</c>, never from <c>Position</c>.</b> The predictor
-    /// replays the shared simulation, which clamps against map bounds expressed in server
+    /// <b>It reconciles from the server's own coordinates, never from <c>Position</c>.</b> The
+    /// predictor replays the shared simulation, which clamps against map bounds expressed in server
     /// coordinates, so it must be handed the coordinates the server actually sent. <c>Position</c>
     /// is the view's field; recovering server space from it would mean inverting
     /// <c>SnapshotSpaceMapping</c>, and a float round trip through a projection is not bit-exact —
-    /// replay would integrate from a position the server never held. That is why the anchor carries
-    /// both and why the mapping still has no inverse.
+    /// replay would integrate from a position the server never held. Those coordinates are taken
+    /// from the <c>WorldState</c> entry of the snapshot being reconciled, which also supplies its
+    /// tick, ack and <c>ack_applied_tick</c>, so all four describe one snapshot;
+    /// <see cref="ReconciliationAnchor.ServerPosition"/> holds the same wire floats but no tick,
+    /// and is used only when the local entity is not in <c>WorldState</c>.
+    /// </para>
+    /// <para>
+    /// <b>It compares against the predictor's history and steers its clock</b>, exactly as
+    /// <c>WorldViewBinder</c> does for a GameObject view: the snapshot's base tick and
+    /// <c>ack_applied_tick</c> go to the <c>Reconcile</c> overloads that take them, and
+    /// <c>PredictionClockSteering.OnSnapshot</c> keeps the client's tick line on the server's.
+    /// Before this the DOTS path did neither, and its clock ran away from the server's by
+    /// 22-23 ticks over 55 seconds against a server 0.7% slow.
     /// </para>
     /// <para>
     /// <b>It also feeds the server's speed.</b> <c>PredictionSettings.Speed</c> is fixed at
@@ -68,6 +79,12 @@ namespace Cuvara.DOTS.Netcode.Prediction
         /// <summary>Anchor sequence at the last reconcile, so an ack without a fresh anchor waits a frame.</summary>
         private uint _lastAnchorSequence;
 
+        /// <summary>
+        /// <c>WorldState.Tick</c> at the last snapshot reconcile: each merged snapshot is folded in
+        /// exactly once.
+        /// </summary>
+        private long _lastWorldTick;
+
         /// <summary><see cref="DotsEntityView.Generation"/> the ack/anchor memory belongs to.</summary>
         private int _lastGeneration;
 
@@ -95,11 +112,20 @@ namespace Cuvara.DOTS.Netcode.Prediction
             // is, possibly below the last one seen, and the anchor sequence restarts with the new
             // mirror. Carrying the old memory across would make `ackTick > _lastAckTick` false for
             // the rest of the session and silently disable reconciliation after every reconnect.
-            if (view.Generation != _lastGeneration)
+            // The world tick and the clock measurements belong to the old route for the same
+            // reason.
+            //
+            // A world tick that went BACKWARDS is the same event seen from WorldState (it was
+            // Reset for a new join or a map transfer) and is treated the same way.
+            var worldState = reference.World;
+            if (view.Generation != _lastGeneration
+                || (worldState != null && worldState.Tick < _lastWorldTick))
             {
                 _lastGeneration = view.Generation;
                 _lastAckTick = 0L;
                 _lastAnchorSequence = 0u;
+                _lastWorldTick = 0L;
+                reference.Steering?.Reset();
             }
 
             var entityManager = state.EntityManager;
@@ -133,80 +159,102 @@ namespace Cuvara.DOTS.Netcode.Prediction
                     entityManager.AddComponent<PredictedTransform>(entity);
                 }
 
-                var anchor = entityManager.GetComponentData<ReconciliationAnchor>(entity);
-
-                // Only on a new acknowledgement AND a fresh anchor. Reconciling every frame against
-                // an unchanged tick would replay the same unacknowledged inputs repeatedly and count
-                // corrections that never happened, which is a diagnostics lie as well as wasted
-                // work. And an ack that advanced while the anchor did not — the binder merged a
-                // newer snapshot after this frame's drain — would pair the new tick with the
-                // previous snapshot's position; that pair is not a state the server ever held, so
-                // it waits for next frame's drain. An anchor at sequence zero has never received a
-                // state and is the spawn placeholder, never something to rewind to.
-                var ackTick = reference.World?.AckTick ?? 0L;
-                if (ackTick > _lastAckTick && anchor.Sequence != 0u && anchor.Sequence != _lastAnchorSequence)
+                // THE SNAPSHOT PATH: once per merged snapshot, everything from that one snapshot.
+                //
+                // This used to reconcile through the two-argument Reconcile(position, ack): no
+                // snapshot tick, so the predictor's history was never consulted and every
+                // reconcile replayed instead; and nothing steered the predictor's clock, so it
+                // counted base ticks off the client's frame clock for the whole session. Measured
+                // against a server running 0.7% slow, the client's tick line ran 22-23 ticks ahead
+                // of the server's over 55 seconds -- that much latency, and before
+                // ack_applied_tick that much error at every start and stop, on the path the game
+                // actually runs. WorldViewBinder had both all along; this is the same sequence,
+                // through the same code (PredictionClockSteering), for a consumer that binds views
+                // itself.
+                //
+                // Position, tick, ack and ack_applied_tick are all read from WorldState here, not
+                // the position from the anchor. They must describe ONE snapshot, and the anchor
+                // carries no tick (IEntityView.SetState has none to give it): it is refreshed by
+                // the binder on its own schedule, so pairing it with WorldState's tick can pair a
+                // position from one snapshot with the tick of the next -- a whole snapshot interval
+                // of motion reported as a correction. WorldState's entry holds the same wire
+                // floats the anchor's ServerPosition does, bit for bit, so nothing is lost.
+                bool reconciled = false;
+                if (worldState != null && worldState.Tick > 0L && worldState.Tick > _lastWorldTick)
                 {
-                    _lastAckTick = ackTick;
-                    _lastAnchorSequence = anchor.Sequence;
-                    bool reconciled = false;
-
-                    // Speed first, then position — the same order WorldViewBinder uses on the
-                    // GameObject path, and the order matters: Reconcile replays every
-                    // unacknowledged input, so replaying at a stale speed integrates the whole
-                    // backlog at the wrong rate.
-                    //
-                    // It is read here rather than carried on ReconciliationAnchor because the
-                    // anchor is written from IEntityView.SetState, which carries no speed — the
-                    // wire value only exists on WorldState. And it is read here rather than left
-                    // to the consumer because netcode's binder feeds it ONLY in its predictor
-                    // overload, which its own docs tell the DOTS path not to use: "hand the
-                    // predictor to that system instead". That leaves this system as the only thing
-                    // that can.
-                    //
-                    // Non-positive is ignored inside SetServerSpeed — on the wire that means "not
-                    // sent" — so a server that never populates it leaves the constructed fallback
-                    // standing rather than collapsing the speed to zero.
-                    if (reference.World != null)
+                    // ToString allocates, once per snapshot rather than once per frame: at a 15 Hz
+                    // world rate that is a handful of short-lived strings a second. Interning it is
+                    // a change to make when a profiler says so, not before.
+                    var wireId = entityManager.GetComponentData<NetworkEntity>(entity).Id.ToString();
+                    if (worldState.TryGet(wireId, out var snapshot))
                     {
-                        // ToString allocates, once per reconcile rather than once per frame: at a
-                        // 15 Hz tick that is a handful of short-lived strings a second. Interning
-                        // it is a change to make when a profiler says so, not before.
-                        var wireId = entityManager.GetComponentData<NetworkEntity>(entity).Id.ToString();
-                        // Seed FIRST, and only once — netcode's SeedBaseTick is idempotent.
-                        //
-                        // Without it the predictor's _baseTick starts at zero while the server's
-                        // world tick is wherever that server happens to be, so the two counters
-                        // never share an epoch and every held-movement decision is made against a
-                        // phase that is wrong by a constant. netcode v0.16.0 added it and wired its
-                        // own WorldViewBinder; its CHANGELOG says outright that a consumer binding
-                        // views itself -- which is exactly what this system does -- "must call it,
-                        // or the feature is inert and you keep the defect". This system was that
-                        // consumer and was not calling it, so the #13 fix did nothing on the DOTS
-                        // path: the only path the DOTS sample actually runs.
-                        predictor.SeedBaseTick(reference.World.Tick);
+                        long worldTick = worldState.Tick;
+                        long ackTick = worldState.AckTick;
+                        _lastWorldTick = worldTick;
+                        _lastAckTick = ackTick;
+                        _lastAnchorSequence = entityManager.GetComponentData<ReconciliationAnchor>(entity).Sequence;
 
-                        if (reference.World.TryGet(wireId, out var snapshot))
+                        // Speed first, then the clock, then position — the order WorldViewBinder
+                        // uses. Reconcile replays unacknowledged inputs, so replaying at a stale
+                        // speed integrates the whole backlog at the wrong rate. Non-positive is
+                        // ignored inside SetServerSpeed: on the wire that means "not sent".
+                        predictor.SetServerSpeed(snapshot.Speed);
+
+                        // Seeds the predictor's base tick once (idempotent), measures the snapshot
+                        // age and acknowledgement floor, feeds a corroborated rate forward and
+                        // steers the phase -- see PredictionClockSteering. Time is the DOTS world's
+                        // own clock, the one Advance is fed from below; NoteInputSent must use the
+                        // same one (DotsPredictionBootstrap.NoteInputSent does).
+                        double now = SystemAPI.Time.ElapsedTime;
+                        var steering = reference.Steering;
+                        if (steering != null)
                         {
-                            predictor.SetServerSpeed(snapshot.Speed);
-
-                            // Protocol 3 (ADR-28): a predictor running the 3D motor must be
-                            // corrected in height too, or a missed landing or a server-side
-                            // step-up is never repaired and the local player floats or sinks
-                            // for the rest of the session. The anchor carries only the ground
-                            // plane, so height and vertical velocity come from the same
-                            // WorldState entry the speed does.
-                            if (predictor.UsesCharacterMotor)
-                            {
-                                predictor.Reconcile(
-                                    new Vec3(anchor.ServerPosition.x, anchor.ServerPosition.y, snapshot.Z),
-                                    snapshot.VelZ, ackTick);
-                                reconciled = true;
-                            }
+                            steering.SampleTickRate(worldTick, now);
+                            steering.OnSnapshot(predictor, worldTick, ackTick, now);
                         }
-                    }
+                        else
+                        {
+                            predictor.SeedBaseTick(worldTick);
+                        }
 
-                    if (!reconciled)
+                        // The snapshot's own tick and ack_applied_tick (0 from a protocol 2 server,
+                        // which the predictor treats as "compare at the snapshot tick", as before).
+                        long ackApplied = worldState.AckAppliedTick;
+
+                        // Protocol 3 (ADR-28): a predictor running the 3D motor must be corrected in
+                        // height too, or a missed landing or a server-side step-up is never repaired
+                        // and the local player floats or sinks for the rest of the session.
+                        if (predictor.UsesCharacterMotor)
+                        {
+                            predictor.Reconcile(
+                                new Vec3(snapshot.X, snapshot.Y, snapshot.Z), snapshot.VelZ,
+                                ackTick, worldTick, ackApplied);
+                        }
+                        else
+                        {
+                            predictor.Reconcile(new Vec2(snapshot.X, snapshot.Y), ackTick, worldTick, ackApplied);
+                        }
+
+                        reconciled = true;
+                    }
+                }
+
+                // THE FALLBACK: the local entity is not in WorldState (a view fed by something other
+                // than the binder) -- the previous behaviour, unchanged. Only on a new
+                // acknowledgement AND a fresh anchor: reconciling every frame against an unchanged
+                // tick would replay the same unacknowledged inputs repeatedly and count corrections
+                // that never happened, and an ack that advanced while the anchor did not would pair
+                // the new tick with the previous snapshot's position. An anchor at sequence zero has
+                // never received a state and is the spawn placeholder, never something to rewind to.
+                if (!reconciled)
+                {
+                    var anchor = entityManager.GetComponentData<ReconciliationAnchor>(entity);
+                    var ackTick = worldState?.AckTick ?? 0L;
+                    if (ackTick > _lastAckTick && anchor.Sequence != 0u && anchor.Sequence != _lastAnchorSequence)
                     {
+                        _lastAckTick = ackTick;
+                        _lastAnchorSequence = anchor.Sequence;
+                        if (worldState != null) predictor.SeedBaseTick(worldState.Tick);
                         predictor.Reconcile(ToVec2(anchor.ServerPosition), ackTick);
                     }
                 }
@@ -234,6 +282,7 @@ namespace Cuvara.DOTS.Netcode.Prediction
 
             entities.Dispose();
         }
+
 
         /// <summary>
         /// The one conversion site between ECS maths and the shared simulation's vector type.

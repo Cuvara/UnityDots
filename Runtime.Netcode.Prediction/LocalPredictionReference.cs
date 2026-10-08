@@ -25,11 +25,22 @@ namespace Cuvara.DOTS.Netcode.Prediction
     /// object the binder is merging into, so the position and the tick always come from one
     /// snapshot rather than from two that happen to be adjacent.
     /// </para>
+    /// <para>
+    /// <see cref="Steering"/> keeps the predictor's base-tick clock on the server's. It is netcode's
+    /// <c>PredictionClockSteering</c> -- the code <c>WorldViewBinder</c> steers with -- created by
+    /// <c>DotsPredictionBootstrap.Install</c> for this predictor. Its acknowledgement floor is only
+    /// measured if whatever sends input also reports each send
+    /// (<c>DotsPredictionBootstrap.NoteInputSent</c>); without that the lead falls back to the
+    /// round trip in <c>Steering.RoundTripMs</c>, and to one snapshot interval when that is unset.
+    /// </para>
     /// </remarks>
     public sealed class LocalPredictionReference : IComponentData
     {
         public LocalMovePredictor Predictor;
 
         public WorldState World;
+
+        /// <summary>The clock steering for <see cref="Predictor"/>. See the type remarks.</summary>
+        public PredictionClockSteering Steering;
     }
 }
