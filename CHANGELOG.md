@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-09
+
+Ships with `com.cuvara.netcode` v0.47.0 (prediction fix + KCP/UDP-only gameplay) and
+`sgl-v0.7.0`. Includes the never-tagged 0.30.0 below.
+
 ### Added
 
 - **`LocalPredictionReference.Steering`, `DotsPredictionBootstrap.NoteInputSent(world, inputTick)`
@@ -45,10 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **CI and README peer pins move to `com.cuvara.netcode#v0.46.1` and `sgl-v0.7.0`** (wire
-  protocol 3, and 0.46.1 for `ack_applied_tick` and `PredictionClockSteering`). Both tags are
+- **CI and README peer pins move to `com.cuvara.netcode#v0.47.0` and `sgl-v0.7.0`** (wire
+  protocol 3, and 0.47.0 for `ack_applied_tick` and `PredictionClockSteering`). Both tags are
   created by a human; CI fails until they exist.
-- **`Cuvara.DOTS.Netcode.Prediction` (and its test assembly) now needs `com.cuvara.netcode` >= 0.46.1**
+- **`Cuvara.DOTS.Netcode.Prediction` (and its test assembly) now needs `com.cuvara.netcode` >= 0.47.0**
   (`versionDefines`), the first version with the APIs above. `Cuvara.DOTS.Netcode` keeps >= 0.40.0.
 - **Version 0.31.0** (`package.json`): new public API above.
 - **CI: the netcode-present, full-stack and netcode-absent rows now test against the peers the game
@@ -90,7 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     comment warning about the near-miss version of this (a UXML with no `Style` element at all);
     this is the same failure reached from the other side, and the comment now says so.
 
-## [0.30.0]
+## [0.30.0] - not tagged separately; released as part of 0.31.0
 
 ### Added
 - **Entity pose over the netcode adapter.** `DotsEntityView` now implements

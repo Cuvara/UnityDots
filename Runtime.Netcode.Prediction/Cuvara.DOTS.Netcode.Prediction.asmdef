@@ -24,7 +24,7 @@
     "versionDefines": [
         {
             "name": "com.cuvara.netcode",
-            "expression": "0.46.1",
+            "expression": "0.47.0",
             "define": "CUVARA_NETCODE"
         },
         {

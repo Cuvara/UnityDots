@@ -317,7 +317,7 @@ jobs:
           {
             "dependencies": {
               "com.cuvara.dots": "file:../package",
-              "com.cuvara.netcode": "https://github.com/Cuvara/Netcode.git#v0.46.1",
+              "com.cuvara.netcode": "https://github.com/Cuvara/Netcode.git#v0.47.0",
               "com.unity.entities": "1.4.8",
               "com.unity.burst": "1.8.30",
               "com.unity.collections": "2.6.8",
@@ -685,7 +685,7 @@ jobs:
           {
             "dependencies": {
               "com.cuvara.dots": "file:../package",
-              "com.cuvara.netcode": "https://github.com/Cuvara/Netcode.git#v0.46.1",
+              "com.cuvara.netcode": "https://github.com/Cuvara/Netcode.git#v0.47.0",
               "com.unity.entities": "1.4.8",
               "com.unity.burst": "1.8.30",
               "com.unity.collections": "2.6.8",
