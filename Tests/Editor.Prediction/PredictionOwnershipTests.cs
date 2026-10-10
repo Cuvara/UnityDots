@@ -160,8 +160,13 @@ namespace Cuvara.DOTS.Tests.Prediction
         }
 
         [Test]
-        public void AnAckThatOutranTheDrain_WaitsForTheAnchor_RatherThanPairingWithAStalePosition()
+        public void AMergedSnapshot_IsReconciledOnce_FromWorldState_SoItCannotPairWithAStaleAnchor()
         {
+            // This used to wait for the anchor: the position came from ReconciliationAnchor and the
+            // tick from WorldState, and an ack that outran the drain would have paired (tick 2,
+            // position of tick 1). Position, tick, ack and ack_applied_tick now all come from the
+            // merged snapshot's own WorldState entry, so there is no pair to go stale -- and the
+            // snapshot is folded in exactly once however often the anchor is refreshed after it.
             var predictor = Predictor();
             DotsPredictionBootstrap.Install(_world, predictor, _worldState);
 
@@ -170,19 +175,18 @@ namespace Cuvara.DOTS.Tests.Prediction
             Tick(); // seed
             Assert.AreEqual(0, predictor.Reconciles);
 
-            // The binder merged tick 2 but the view has not been fed its state yet — the ack moved,
-            // the anchor did not. Reconciling now would hand the predictor (tick 2, position of
-            // tick 1), a pair the server never produced.
+            // The binder merged tick 2 but the view has not been fed its state yet.
             ApplyServerSnapshot(2f, 2f, tick: 2);
             Tick();
-            Assert.AreEqual(0, predictor.Reconciles, "no fresh anchor, no reconcile");
+            Assert.AreEqual(1, predictor.Reconciles, "the merged snapshot is reconciled on the frame it is seen");
+            Assert.AreEqual(2f, predictor.SimulatedPosition.X, 1e-4f, "and from its own position, not the anchor's");
 
             ((IEntityView)_view).SetState("uuid-me", 2f, 2f, 100, 100);
             Tick();
-            Assert.AreEqual(1, predictor.Reconciles, "anchor and ack now describe the same snapshot");
+            Assert.AreEqual(1, predictor.Reconciles, "a refreshed anchor for the same snapshot is not a new snapshot");
 
             Tick();
-            Assert.AreEqual(1, predictor.Reconciles, "an unchanged pair is not reconciled again");
+            Assert.AreEqual(1, predictor.Reconciles, "an unchanged snapshot is not reconciled again");
         }
 
         [Test]
@@ -198,9 +202,12 @@ namespace Cuvara.DOTS.Tests.Prediction
             Tick();
 
             Assert.AreEqual(0u, _entityManager.GetComponentData<ReconciliationAnchor>(Local()).Sequence);
-            Assert.AreEqual(0, predictor.Reconciles, "not even the seeding reconcile ran against a placeholder");
+            // The predictor is seeded from the merged snapshot's own position (WorldState), never
+            // from the placeholder: the placeholder's (0, 0) is not where the server put anyone.
+            Assert.AreEqual(0, predictor.Reconciles, "the first reconcile only seeds");
+            Assert.AreEqual(40f, predictor.SimulatedPosition.X, 1e-3f, "seeded from the snapshot, not the placeholder");
 
-            // The first real state seeds the predictor from a real position.
+            // The first real state agrees with it.
             ((IEntityView)_view).SetState("uuid-me", 40f, 40f, 100, 100);
             Tick();
             Assert.AreEqual(40f, predictor.Position.X, 1e-3f);

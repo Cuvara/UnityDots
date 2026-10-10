@@ -7,8 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-09
+
+Ships with `com.cuvara.netcode` v0.47.0 (prediction fix + KCP/UDP-only gameplay) and
+`sgl-v0.7.0`. Includes the never-tagged 0.30.0 below.
+
+### Added
+
+- **`LocalPredictionReference.Steering`, `DotsPredictionBootstrap.NoteInputSent(world, inputTick)`
+  and `DotsPredictionBootstrap.TryGetClockSteering(world, out steering)`.** `Install` creates a
+  netcode `PredictionClockSteering` for the predictor (kept across a re-install with the same
+  predictor). Report every input send with `NoteInputSent` beside `RecordInput` so the
+  acknowledgement floor is measured; it stamps the DOTS world's `Time.ElapsedTime`, the clock the
+  system measures snapshots and advances the predictor with.
+
+### Fixed
+
+- **`LocalPredictionSystem` reconciles against the predictor's history at the right tick and steers
+  its clock** - the path the game runs (`MainScene`). It called the two-argument
+  `Reconcile(position, ack)`: no snapshot tick, so the history was never used, and nothing steered
+  the predictor's clock, which in a deterministic harness against a server 0.7% slow ran from 0 to
+  22-23 ticks ahead of the server's tick line over 55 s. Once per merged snapshot (whenever
+  `WorldState.Tick` advances) it now feeds `SetServerSpeed`, then
+  `PredictionClockSteering.SampleTickRate` + `OnSnapshot` (seed, measure, feed a corroborated rate
+  forward, steer - the code `WorldViewBinder` steers with), then
+  `Reconcile(position, ack, worldTick, WorldState.AckAppliedTick)` (the `Vec3` overload, with `z`
+  and `vel_z`, under the 3D motor). Position, tick, ack and `ack_applied_tick` all come from the
+  snapshot's own `WorldState` entry, so they cannot describe two different snapshots; the old
+  anchor-plus-new-ack rule remains only as the fallback for a local entity that is not in
+  `WorldState`. The system's memory and the clock measurements reset on a new view generation or
+  when `WorldState.Tick` goes backwards. Tests: `LocalPredictionClockAndOffsetTests` (new),
+  `PredictionOwnershipTests.AMergedSnapshot_IsReconciledOnce_FromWorldState_SoItCannotPairWithAStaleAnchor`
+  (replaces the anchor-wait test, whose pairing problem no longer exists).
+
+- **The local player's height is reconciled on a protocol 3 server** (ADR-28).
+  `LocalPredictionSystem` reconciled only the ground plane, so a predictor running netcode's
+  3D `CharacterMotor` never had its height or vertical velocity corrected: a missed landing or a
+  server-side step-up stayed wrong for the session. When the predictor uses the motor, the
+  system now reconciles with the snapshot's `z` and `vel_z` through netcode's
+  `LocalMovePredictor.Reconcile(Vec3, float, long)`. Protocol 2 servers take the unchanged
+  two-dimensional path.
+
 ### Changed
 
+- **CI and README peer pins move to `com.cuvara.netcode#v0.47.0` and `sgl-v0.7.0`** (wire
+  protocol 3, and 0.47.0 for `ack_applied_tick` and `PredictionClockSteering`). Both tags are
+  created by a human; CI fails until they exist.
+- **`Cuvara.DOTS.Netcode.Prediction` (and its test assembly) now needs `com.cuvara.netcode` >= 0.47.0**
+  (`versionDefines`), the first version with the APIs above. `Cuvara.DOTS.Netcode` keeps >= 0.40.0.
+- **Version 0.31.0** (`package.json`): new public API above.
 - **CI: the netcode-present, full-stack and netcode-absent rows now test against the peers the game
   ships** - `com.cuvara.netcode` `v0.41.0` -> `v0.45.0` and `com.rpgmmo.shared-gamelogic`
   `sgl-v0.5.0` -> `sgl-v0.6.0`, the pins in `IndieRPGMMOAdventure`'s `packages-lock.json`. The pins are
@@ -48,7 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     comment warning about the near-miss version of this (a UXML with no `Style` element at all);
     this is the same failure reached from the other side, and the comment now says so.
 
-## [0.30.0]
+## [0.30.0] - not tagged separately; released as part of 0.31.0
 
 ### Added
 - **Entity pose over the netcode adapter.** `DotsEntityView` now implements
