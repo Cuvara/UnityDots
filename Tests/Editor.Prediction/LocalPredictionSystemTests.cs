@@ -509,5 +509,54 @@ namespace Cuvara.DOTS.Tests.Prediction
             Assert.AreEqual(firstClaimed, _entityManager.HasComponent<PredictedTransform>(first));
             Assert.AreEqual(secondClaimed, _entityManager.HasComponent<PredictedTransform>(second));
         }
+
+        [TestCase(true, false)]
+        [TestCase(false, false)]
+        [TestCase(true, true)]
+        public void AReconnectToLowerTicks_DropsThePriorSessionsInputs_AndStartsAtTheNewSpawn(
+            bool newGeneration, bool consumerResetsPredictor)
+        {
+            // The session boundary is a predictor boundary. Inputs recorded in the old session are
+            // above the new session's ack line, so a predictor carried across would never see them
+            // acknowledged: the new session's first reconcile would replay them from the new spawn
+            // and every new input would be rejected as not newer than the old session's last tick.
+            // The third case is a consumer that resets the predictor on reconnect itself (the
+            // shipping client does): the driver's reset on top of it must change nothing.
+            var predictor = Predictor();
+            DotsPredictionBootstrap.Install(_world, predictor, _worldState);
+
+            // Old session: seeded at tick 100, then ten unacknowledged moves.
+            SpawnLocal(100f, 100f);
+            ApplyServerSnapshot("uuid-me", 100f, 100f, speed: 5f, tick: 100);
+            Tick(0.016f);
+            for (long tick = 101; tick <= 110; tick++) predictor.RecordInput(tick, 1f, 0f);
+            for (var frame = 0; frame < 5; frame++) Tick(0.016f);
+            Assert.AreEqual(10, predictor.PendingCount, "guard: the old session has pending inputs");
+
+            // Reconnect: the new server's ticks start below the old ones, and the player spawns
+            // somewhere else. The gap is kept inside the predictor's hard-resync window (two
+            // seconds of ticks): a larger one would make the clock steering drop the pending
+            // inputs on its own and hide the replay this guards against.
+            if (consumerResetsPredictor) predictor.Reset();
+            if (newGeneration) _view.BeginGeneration();
+            _worldState.Reset();
+            SpawnLocal(300f, 500f);
+            ApplyServerSnapshot("uuid-me", 300f, 500f, speed: 5f, tick: 90);
+            Tick(0.016f);
+
+            Assert.AreEqual(0, predictor.PendingCount, "no input from the previous session survives the reconnect");
+            Assert.AreEqual(300f, predictor.Position.X, 1e-4f, "the predictor starts at the new spawn");
+            Assert.AreEqual(500f, predictor.Position.Y, 1e-4f, "the predictor starts at the new spawn");
+            var local = Local();
+            Assert.IsTrue(_entityManager.HasComponent<PredictedTransform>(local), "guard: the new mirror is predicted");
+            Assert.AreEqual(SnapshotSpaceMapping.XZPlane.ToWorld(300f, 500f),
+                _entityManager.GetComponentData<LocalTransform>(local).Position,
+                "the local entity is drawn at the new spawn");
+
+            // The new session's first input is kept, not rejected against the old tick line.
+            predictor.RecordInput(91, 1f, 0f);
+            Assert.AreEqual(0, predictor.RejectedInputs, "the first new-session input is not rejected");
+            Assert.AreEqual(1, predictor.PendingCount, "the first new-session input is pending");
+        }
     }
 }
