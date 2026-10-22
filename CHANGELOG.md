@@ -46,7 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than the old session's last tick. The system now calls `LocalMovePredictor.Reset()` at the same
   boundary, before the new session's first reconcile. A host that also resets the predictor on
   reconnect (the shipping client does) is unaffected: the reset is idempotent and the first
-  new-session input is kept. Test (3 cases: new generation, backwards world tick only, host resets
+  new-session input is kept. For a host that did not reset, the new session's first snapshot now
+  seeds the predictor at the new spawn (not counted in `Reconciles`) instead of reconciling the old
+  session's state; `PredictionOwnershipTests.ReconnectReset_ReenablesReconciliation_WhenTheNewServersTicksAreLower`
+  now asserts that seed and a reconcile on the next lower-tick snapshot. Test (3 cases: new generation, backwards world tick only, host resets
   too):
   `LocalPredictionSystemTests.AReconnectToLowerTicks_DropsThePriorSessionsInputs_AndStartsAtTheNewSpawn`.
 
