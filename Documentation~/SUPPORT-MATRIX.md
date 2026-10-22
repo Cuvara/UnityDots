@@ -94,7 +94,7 @@ or publishes, who owns what, and how it is torn down.
 | Dependencies | core + `Cuvara.DOTS.Netcode` + `com.cuvara.netcode` ≥ 0.31.0 + `com.rpgmmo.shared-gamelogic` (both defines required). |
 | Installation | `DotsPredictionBootstrap.Install(world, predictor, worldState)` after the adapter. Publishes `LocalPredictionReference` (managed); creates `LocalPredictionSystem` in `PredictionSystemGroup`. |
 | Update groups | `PredictionSystemGroup`, after `SnapshotApplyGroup`, inside `NetcodeSystemGroup`. |
-| Singletons | Requires `LocalPredictionReference`. Claims the local entity's `LocalTransform` by adding `PredictedTransform`. |
+| Singletons | Requires `LocalPredictionReference`. Finds the local entity by its `LocalNetworkEntity` tag (added at spawn) and claims exactly one local entity's `LocalTransform` by adding `PredictedTransform`. |
 | Ownership | The `LocalMovePredictor` instance is the composition root's — the same object input calls `RecordInput` on. |
 | Teardown | `DotsPredictionBootstrap.Uninstall(world)` removes `PredictedTransform` from every entity (hands the transform back to the adapter) and destroys the singleton. Call it **before** `DotsNetcodeBootstrap.Uninstall`. |
 

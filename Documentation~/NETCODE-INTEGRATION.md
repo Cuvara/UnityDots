@@ -40,6 +40,7 @@ Each replicated entity carries:
 | Component | Purpose |
 |-----------|---------|
 | `NetworkEntity` | Wire id, server entity kind, `IsLocal` flag |
+| `LocalNetworkEntity` (tag) | Local player's mirror only (`IsLocal`); added at spawn, never toggled |
 | `NetworkEntityState` | Newest authoritative HP from server |
 | `ReconciliationAnchor` | Newest authoritative position (world + server space), `Sequence` of states written, stated `Tick` or 0 |
 | `SnapshotSample` (buffer) | Buffered positions for remote interpolation |
@@ -90,6 +91,12 @@ the wire and nothing else. Nothing predicted or rendered ever reaches it.
 - The adapter writes only `ReconciliationAnchor` (authoritative position); the
   prediction system claims `LocalTransform` by adding `PredictedTransform`.
 - Remote interpolation excludes entities with `PredictedTransform` (`WithNone`).
+- **Which entity**: the system queries the `LocalNetworkEntity` tag, so it visits local mirrors
+  only, never every mirror. Exactly one is predicted per frame: if two local mirrors ever coexist
+  (no current path produces that), the one already holding `PredictedTransform` keeps it (else the
+  first in query order), the predictor advances once, and every other local mirror has its claim
+  released so the adapter keeps writing it. An entity built by hand must add `LocalNetworkEntity`
+  itself to be predicted.
 - **Reconciliation inputs** (once per merged snapshot, i.e. whenever `WorldState.Tick`
   advanced): the local entity's `WorldState` entry (`X`, `Y`, and under the 3D motor `Z` and
   `VelZ` - the wire's own coordinates, the same floats `anchor.ServerPosition` holds),
@@ -148,7 +155,10 @@ The drain:
    (`Metrics.StaleCommandsDropped`) — queued old-session states and spawns never touch
    the world, and a stale producer still holding the old binder cannot resurrect anything;
 2. on the `Reset`, tears down every mirror of the previous generation with
-   `NetworkDespawnReason.SessionReset` (one `NetworkEntityDespawned` per id);
+   `NetworkDespawnReason.SessionReset` (one `NetworkEntityDespawned` per id), and resets the
+   render clock (`InterpolationTimeline.Clock.Reset()`) when interpolation is installed, so a
+   new server whose ticks are lower than the old one's still interpolates (the clock refuses
+   every tick at or below its newest);
 3. applies the new generation's commands.
 
 Old entities therefore never flicker back for a frame, which a burst of despawns from

@@ -190,6 +190,15 @@ namespace Cuvara.DOTS.Netcode
                         case NetworkViewCommandKind.Reset:
                             // Every mirror still present belongs to the previous generation.
                             Teardown(entityManager, lifecycle, NetworkDespawnReason.SessionReset);
+
+                            // The render clock belongs to the old session too. A new server's ticks
+                            // start wherever it is, often far below the old one's (a drain to another
+                            // pod, a restart), and NoteSnapshot refuses every tick <= NewestTick — so
+                            // a clock carried across would hold every new mirror at its newest sample
+                            // until the new ticks overtook the old ones. Reset in place: the states
+                            // of the new generation later in this same drain then seed it afresh.
+                            if (timed) timeline.Clock.Reset();
+
                             _generation = command.Generation;
                             metrics.NoteGenerationReset();
                             break;

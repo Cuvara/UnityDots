@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`LocalNetworkEntity` tag.** The snapshot adapter adds it at spawn to the local player's mirror
+  (`NetworkEntity.IsLocal`), with the rest of the spawn set, and never toggles it, so the archetype
+  stays stable.
+
+### Changed
+
+- **`LocalPredictionSystem` finds the local entity through the `LocalNetworkEntity` tag** instead
+  of matching every mirror each frame and reading `NetworkEntity` on each to find the one local
+  entity: per-frame main-thread work no longer grows with the number of replicated entities.
+  Behaviour is otherwise unchanged. Test:
+  `LocalPredictionSystemTests.OnlyTheLocalMirror_IsTaggedAtSpawn_AndOnlyItIsPredicted_AmongRemoteMirrors`.
+
+### Fixed
+
+- **A reconnect to a server with lower ticks interpolates again on the timed path.** The drain's
+  `Reset` command (from `DotsEntityView.BeginGeneration`) tore down the mirrors but kept the
+  `InterpolationTimeline` render clock, which refuses every tick at or below its newest. After a
+  reconnect to a server whose ticks were lower (a drain to another pod, a restart), every
+  `SetStateAtTick` of the new session was refused by the clock, and each new mirror was held at its
+  newest sample until the new ticks overtook the old session's. The clock is now reset with the
+  mirrors. Untimed `SetState` consumers (the shipping client) are unaffected. Test:
+  `RemoteInterpolationTests.ANewGenerationWithLowerTicks_ResetsTheRenderClock_AndItsEntitiesInterpolate`.
+- **Exactly one local entity is predicted per frame.** The system advanced the predictor and wrote
+  its position inside the per-entity loop, so two local mirrors coexisting for a frame would have
+  stepped the single predictor's clock twice and put both avatars at its position. It now drives one
+  (the one already holding `PredictedTransform`, else the first) and releases the claim on any other,
+  which the adapter then keeps writing. Test:
+  `LocalPredictionSystemTests.TwoLocalMirrors_AdvanceThePredictorOnceAFrame_AndOnlyOneIsClaimed`.
+
+### Migration
+
+- An entity built by hand (not spawned through `DotsEntityView`) that should be predicted must add
+  `LocalNetworkEntity`; `NetworkEntity.IsLocal` alone no longer selects it for prediction.
+
 ## [0.31.0] - 2026-10-09
 
 Ships with `com.cuvara.netcode` v0.47.0 (prediction fix + KCP/UDP-only gameplay) and
