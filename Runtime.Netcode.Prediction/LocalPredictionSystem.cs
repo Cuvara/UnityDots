@@ -117,6 +117,16 @@ namespace Cuvara.DOTS.Netcode.Prediction
             //
             // A world tick that went BACKWARDS is the same event seen from WorldState (it was
             // Reset for a new join or a map transfer) and is treated the same way.
+            //
+            // The predictor is reset at the same boundary. Its pending inputs, history, base tick
+            // and position belong to the old session: left standing, the new session's first
+            // reconcile acks none of them (their ticks are above the new ack line), replays them
+            // from the new spawn and displaces it, and every new input is rejected as not newer
+            // than the old session's last tick. A consumer that resets the predictor itself on
+            // reconnect loses nothing to this second reset: Reset only assigns, and an unseeded
+            // predictor drops RecordInput anyway, so nothing a new session can have recorded is
+            // lost. The predictor is seeded only by the reconcile below, which runs after this in
+            // the same update, so the first new-session input lands on a seeded predictor.
             var worldState = reference.World;
             if (view.Generation != _lastGeneration
                 || (worldState != null && worldState.Tick < _lastWorldTick))
@@ -126,6 +136,7 @@ namespace Cuvara.DOTS.Netcode.Prediction
                 _lastAnchorSequence = 0u;
                 _lastWorldTick = 0L;
                 reference.Steering?.Reset();
+                predictor.Reset();
             }
 
             var entityManager = state.EntityManager;

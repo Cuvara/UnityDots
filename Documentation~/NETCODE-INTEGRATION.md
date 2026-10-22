@@ -117,11 +117,15 @@ the wire and nothing else. Nothing predicted or rendered ever reaches it.
   AckTick)` only when `AckTick` advanced *and* `anchor.Sequence` changed since the last reconcile
   and is non-zero, so an ack that outran the drain waits one frame and the spawn placeholder
   (`Sequence == 0`) is never rewound to.
-- **Reconnect**: the system's ack/anchor/world-tick memory and the clock measurements reset when
-  `DotsEntityView.Generation` changes or `WorldState.Tick` goes backwards, so a new server whose
-  ticks are lower still reconciles. Resetting the
-  predictor itself (`LocalMovePredictor.Reset()`) remains the host's call, alongside
-  `WorldState.Reset()` and `view.BeginGeneration()`.
+- **Reconnect**: the system's ack/anchor/world-tick memory, the clock measurements and the
+  predictor (`LocalMovePredictor.Reset()`) reset when `DotsEntityView.Generation` changes or
+  `WorldState.Tick` goes backwards, so a new server whose ticks are lower still reconciles, and no
+  input, history or position from the old session is replayed from the new spawn. The reset runs
+  before the new session's first reconcile in the same update, and only that reconcile seeds the
+  predictor, so the first input recorded after it is kept. A host that also resets the predictor
+  on reconnect (as below) loses nothing to the second reset: `Reset` only assigns, and an
+  unseeded predictor drops `RecordInput` anyway. `WorldState.Reset()` and
+  `view.BeginGeneration()` remain the host's call.
 - Toggling: `DotsPredictionBootstrap.Uninstall` removes `PredictedTransform`, so the
   adapter's next state drives the transform again; a re-install claims it before its
   first write. There is no frame with zero writers in either direction.

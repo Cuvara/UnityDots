@@ -37,6 +37,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (the one already holding `PredictedTransform`, else the first) and releases the claim on any other,
   which the adapter then keeps writing. Test:
   `LocalPredictionSystemTests.TwoLocalMirrors_AdvanceThePredictorOnceAFrame_AndOnlyOneIsClaimed`.
+- **A reconnect no longer replays the previous session's inputs from the new spawn.** On a new
+  `DotsEntityView.Generation` or a `WorldState.Tick` that went backwards, `LocalPredictionSystem`
+  reset its own bookkeeping and the clock steering but not the predictor. A host that did not reset
+  the predictor itself kept the old session's pending inputs, history, base tick and position: the
+  new session's first reconcile acknowledged none of those inputs (their ticks were above the new
+  ack line) and replayed them from the new spawn, and every new input was rejected as not newer
+  than the old session's last tick. The system now calls `LocalMovePredictor.Reset()` at the same
+  boundary, before the new session's first reconcile. A host that also resets the predictor on
+  reconnect (the shipping client does) is unaffected: the reset is idempotent and the first
+  new-session input is kept. Test (3 cases: new generation, backwards world tick only, host resets
+  too):
+  `LocalPredictionSystemTests.AReconnectToLowerTicks_DropsThePriorSessionsInputs_AndStartsAtTheNewSpawn`.
 
 ### Migration
 
