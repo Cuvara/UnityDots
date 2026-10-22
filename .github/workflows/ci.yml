@@ -408,7 +408,7 @@ jobs:
           fi
           echo "Cuvara.DOTS.Netcode.dll present."
 
-      # The floor that matters most: 44 adapter tests, not ">= 0". Without it a
+      # The floor that matters most: 120 adapter tests, not ">= 0". Without it a
       # mis-typed versionDefines expression compiles the adapter and all its
       # tests out of existence and this job goes green over nothing.
       - name: Assert test floors
@@ -418,8 +418,8 @@ jobs:
             'Cuvara.DOTS.Tests.Editor>=100' \
             'Cuvara.DOTS.Tests.Runtime>=29' \
             'Cuvara.DOTS.Tests.GameLogic>=41' \
-            'Cuvara.DOTS.Tests.Netcode>=47' \
-            'Cuvara.DOTS.Tests.Prediction>=19' \
+            'Cuvara.DOTS.Tests.Netcode>=120' \
+            'Cuvara.DOTS.Tests.Prediction>=32' \
             'Cuvara.DOTS.Tests.Physics==0'
 
       - uses: actions/upload-artifact@v4
@@ -761,8 +761,8 @@ jobs:
             'Cuvara.DOTS.Tests.Editor>=100' \
             'Cuvara.DOTS.Tests.Runtime>=29' \
             'Cuvara.DOTS.Tests.GameLogic>=41' \
-            'Cuvara.DOTS.Tests.Netcode>=47' \
-            'Cuvara.DOTS.Tests.Prediction>=19' \
+            'Cuvara.DOTS.Tests.Netcode>=120' \
+            'Cuvara.DOTS.Tests.Prediction>=32' \
             'Cuvara.DOTS.Tests.DI>=5' \
             'Cuvara.DOTS.Tests.Physics==0'
 

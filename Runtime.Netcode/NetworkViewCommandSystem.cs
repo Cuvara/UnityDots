@@ -268,6 +268,10 @@ namespace Cuvara.DOTS.Netcode
                 IsLocal = command.IsLocal,
             });
 
+            // At spawn, never later: locality is fixed for a mirror's life, so the tag costs no
+            // archetype change, and the predictor queries it instead of scanning every mirror.
+            if (command.IsLocal) entityManager.AddComponent<LocalNetworkEntity>(entity);
+
             entityManager.AddComponentData(entity, new NetworkEntityState { Hp = 0, MaxHp = 0 });
 
             // Added at spawn with the same value LocalTransform got, so the component set is stable

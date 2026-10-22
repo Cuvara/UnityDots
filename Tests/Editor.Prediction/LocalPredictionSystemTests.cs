@@ -419,5 +419,95 @@ namespace Cuvara.DOTS.Tests.Prediction
             using var query = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<PredictedTransform>());
             Assert.AreEqual(0, query.CalculateEntityCount());
         }
+
+        private Entity Find(string id)
+        {
+            using var query = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<NetworkEntity>());
+            using var entities = query.ToEntityArray(Allocator.Temp);
+            var wanted = new FixedString64Bytes(id);
+            for (var i = 0; i < entities.Length; i++)
+            {
+                if (_entityManager.GetComponentData<NetworkEntity>(entities[i]).Id.Equals(wanted)) return entities[i];
+            }
+
+            return Entity.Null;
+        }
+
+        [Test]
+        public void OnlyTheLocalMirror_IsTaggedAtSpawn_AndOnlyItIsPredicted_AmongRemoteMirrors()
+        {
+            // The driver queries the LocalNetworkEntity tag instead of reading NetworkEntity on every
+            // mirror each frame to find the one local entity. The behaviour must be the one the scan
+            // had: remotes spawned before and after the local one are never claimed.
+            var predictor = Predictor();
+            DotsPredictionBootstrap.Install(_world, predictor, _worldState);
+
+            var view = (IEntityView)_view;
+            view.Spawn("uuid-r1", isLocal: false, type: PlayerType);
+            view.Spawn("uuid-r2", isLocal: false, type: PlayerType);
+            SpawnLocal();
+            view.Spawn("uuid-r3", isLocal: false, type: PlayerType);
+            Tick(0.016f);
+
+            var local = Local();
+            Assert.AreNotEqual(Entity.Null, local, "guard: the local mirror exists");
+            Assert.IsTrue(_entityManager.HasComponent<LocalNetworkEntity>(local), "tagged at spawn");
+            Assert.IsTrue(_entityManager.HasComponent<PredictedTransform>(local), "and predicted");
+
+            foreach (var id in new[] { "uuid-r1", "uuid-r2", "uuid-r3" })
+            {
+                var remote = Find(id);
+                Assert.AreNotEqual(Entity.Null, remote, $"guard: {id} exists");
+                Assert.IsFalse(_entityManager.HasComponent<LocalNetworkEntity>(remote), $"{id} is not tagged");
+                Assert.IsFalse(_entityManager.HasComponent<PredictedTransform>(remote), $"{id} is not claimed");
+            }
+        }
+
+        [Test]
+        public void TwoLocalMirrors_AdvanceThePredictorOnceAFrame_AndOnlyOneIsClaimed()
+        {
+            // No current path produces two local mirrors, but one predictor driven for two entities
+            // would step its clock twice a frame and stamp its position on both avatars. Exactly one
+            // is driven; the other is handed back to the adapter instead of being frozen.
+            var predictor = Predictor();
+            DotsPredictionBootstrap.Install(_world, predictor, _worldState);
+
+            var view = (IEntityView)_view;
+            view.Spawn("uuid-me", isLocal: true, type: PlayerType);
+            view.Spawn("uuid-me-2", isLocal: true, type: PlayerType);
+            Tick(0f);
+
+            // The same frames on a predictor nobody else drives: what "once a frame" adds up to.
+            var reference = Predictor();
+            for (var frame = 0; frame < 5; frame++)
+            {
+                Tick(0.1f);
+                reference.Advance(0.1f);
+            }
+
+            Assert.Greater(reference.BaseTicksAdvanced, 0, "guard: these frames step base ticks at all");
+            Assert.AreEqual(reference.BaseTicksAdvanced, predictor.BaseTicksAdvanced,
+                "the predictor advanced once per frame, not once per local mirror");
+
+            var first = Find("uuid-me");
+            var second = Find("uuid-me-2");
+            Assert.IsTrue(_entityManager.HasComponent<LocalNetworkEntity>(first), "guard: both are local mirrors");
+            Assert.IsTrue(_entityManager.HasComponent<LocalNetworkEntity>(second), "guard: both are local mirrors");
+
+            var firstClaimed = _entityManager.HasComponent<PredictedTransform>(first);
+            var secondClaimed = _entityManager.HasComponent<PredictedTransform>(second);
+            Assert.AreNotEqual(firstClaimed, secondClaimed, "exactly one local mirror is predicted");
+
+            // The unclaimed one is the adapter's again: its next state lands on its transform.
+            var unclaimed = firstClaimed ? "uuid-me-2" : "uuid-me";
+            view.SetState(unclaimed, 4f, 5f, 100, 100);
+            Tick(0.1f);
+            Assert.AreEqual(new float3(4f, 0f, 5f),
+                _entityManager.GetComponentData<LocalTransform>(Find(unclaimed)).Position);
+
+            // And the choice holds from frame to frame rather than flipping with chunk order.
+            Assert.AreEqual(firstClaimed, _entityManager.HasComponent<PredictedTransform>(first));
+            Assert.AreEqual(secondClaimed, _entityManager.HasComponent<PredictedTransform>(second));
+        }
     }
 }
