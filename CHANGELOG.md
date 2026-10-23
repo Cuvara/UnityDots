@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-10-23
+
+Ships with `com.cuvara.netcode` v0.48.0 and `sgl-v0.7.0` (unchanged). Minor, not patch: adds the
+public `LocalNetworkEntity` tag and changes which entity `LocalPredictionSystem` predicts (see
+Migration).
+
+Compatibility: Unity 6000.3.9f1; netcode v0.48.0 (CI pin moved from v0.47.0); sgl-v0.7.0.
+Evidence: GitHub Actions CI for the release commit, with the exact run recorded in the X6 completion report;
+rows core-only, netcode-absent, netcode-present, physics, full-stack, gamefoundation.
+
 ### Added
 
 - **`LocalNetworkEntity` tag.** The snapshot adapter adds it at spawn to the local player's mirror
@@ -55,8 +65,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Migration
 
-- An entity built by hand (not spawned through `DotsEntityView`) that should be predicted must add
-  `LocalNetworkEntity`; `NetworkEntity.IsLocal` alone no longer selects it for prediction.
+- Before: a hand-built entity (not spawned through `DotsEntityView`) was selected for prediction by
+  `NetworkEntity.IsLocal` alone. After: add `LocalNetworkEntity` to any such entity that should be
+  predicted; `NetworkEntity.IsLocal` alone no longer selects it.
+
+## [Unreleased]
 
 ## [0.31.0] - 2026-10-09
 
