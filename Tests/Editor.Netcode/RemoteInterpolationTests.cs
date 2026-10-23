@@ -139,6 +139,18 @@ namespace Cuvara.DOTS.Tests.Netcode
             }
         }
 
+        /// <summary>
+        /// <see cref="FeedLine"/> on an arbitrary tick and receive-time base: the same +1 walk from
+        /// x = 3, at ticks <paramref name="firstTick"/> onwards.
+        /// </summary>
+        private void FeedLineFrom(string id, long firstTick, double firstReceiveTime, int ticks)
+        {
+            for (var i = 0; i < ticks; i++)
+            {
+                _view.SetStateAtTick(id, 3f + i, 0f, 100, 100, firstTick + i, firstReceiveTime + i * SecondsPerSnapshot);
+            }
+        }
+
         private void Spawn(string id) => ((IEntityView)_view).Spawn(id, isLocal: false, type: PlayerType);
 
         [Test]
@@ -278,6 +290,53 @@ namespace Cuvara.DOTS.Tests.Netcode
 
             Assert.AreEqual(1, SampleCountOf("uuid-d"), "the duplicate tick was refused");
             Assert.AreEqual(new float3(2f, 0f, 3f), PositionOf("uuid-d"));
+        }
+
+        [Test]
+        public void ANewGenerationWithLowerTicks_ResetsTheRenderClock_AndItsEntitiesInterpolate()
+        {
+            // A reconnect to a server whose ticks are far BELOW the old session's — a drain to
+            // another pod, a restarted server. The render clock refuses every tick <= NewestTick,
+            // so a clock carried across the reset would hear nothing from the new session until its
+            // ticks overtook the old ones, and every new mirror would sit at its newest sample
+            // instead of being interpolated. At 60 Hz that is hours of presentation for a long
+            // session, and it reads as "remote players stopped interpolating after a reconnect".
+            Spawn("uuid-g");
+            FeedLineFrom("uuid-g", firstTick: 10_001, firstReceiveTime: 0.0, ticks: 8);
+            for (var i = 0; i < 20; i++) Frame();
+
+            using var query = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<InterpolationTimeline>());
+            Assert.AreEqual(10_008L, query.GetSingleton<InterpolationTimeline>().Clock.NewestTick,
+                "precondition: the old session's clock is in the old tick space");
+
+            _view.BeginGeneration();
+            Spawn("uuid-g");
+            FeedLineFrom("uuid-g", firstTick: 101, firstReceiveTime: 5.0, ticks: 8);
+            Frame();
+
+            Assert.AreEqual(108L, query.GetSingleton<InterpolationTimeline>().Clock.NewestTick,
+                "the new session's ticks reached the render clock");
+            Assert.AreEqual(8, SampleCountOf("uuid-g"), "a fresh mirror, with the new session's samples");
+            Assert.IsTrue(_entityManager.GetComponentData<InterpolationState>(Find("uuid-g")).HasRendered);
+
+            // The same fill as a first join: the oldest retained state, not the newest (x = 10),
+            // which is where a stale clock far past every new tick would hold the entity.
+            var previous = PositionOf("uuid-g").x;
+            Assert.AreEqual(3f, previous, 1e-3f, "rendered from the start of the new buffer");
+
+            var moved = false;
+            for (var i = 0; i < 20; i++)
+            {
+                Frame();
+
+                var current = PositionOf("uuid-g").x;
+                Assert.GreaterOrEqual(current, previous, $"the entity stepped backwards on frame {i}");
+                if (current > previous) moved = true;
+                previous = current;
+            }
+
+            Assert.IsTrue(moved, "the entity moved between samples");
+            Assert.Less(previous, 10f, "interpolated along the path, not held at its newest state");
         }
 
         [Test]

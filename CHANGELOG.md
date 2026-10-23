@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-10-23
+
+Ships with `com.cuvara.netcode` v0.48.0 and `sgl-v0.7.0` (unchanged). Minor, not patch: adds the
+public `LocalNetworkEntity` tag and changes which entity `LocalPredictionSystem` predicts (see
+Migration).
+
+Compatibility: Unity 6000.3.9f1; netcode v0.48.0 (CI pin moved from v0.47.0); sgl-v0.7.0.
+Evidence: GitHub Actions CI for the release commit, with the exact run recorded in the X6 completion report;
+rows core-only, netcode-absent, netcode-present, physics, full-stack, gamefoundation.
+
+### Added
+
+- **`LocalNetworkEntity` tag.** The snapshot adapter adds it at spawn to the local player's mirror
+  (`NetworkEntity.IsLocal`), with the rest of the spawn set, and never toggles it, so the archetype
+  stays stable.
+
+### Changed
+
+- **`LocalPredictionSystem` finds the local entity through the `LocalNetworkEntity` tag** instead
+  of matching every mirror each frame and reading `NetworkEntity` on each to find the one local
+  entity: per-frame main-thread work no longer grows with the number of replicated entities.
+  Behaviour is otherwise unchanged. Test:
+  `LocalPredictionSystemTests.OnlyTheLocalMirror_IsTaggedAtSpawn_AndOnlyItIsPredicted_AmongRemoteMirrors`.
+
+### Fixed
+
+- **A reconnect to a server with lower ticks interpolates again on the timed path.** The drain's
+  `Reset` command (from `DotsEntityView.BeginGeneration`) tore down the mirrors but kept the
+  `InterpolationTimeline` render clock, which refuses every tick at or below its newest. After a
+  reconnect to a server whose ticks were lower (a drain to another pod, a restart), every
+  `SetStateAtTick` of the new session was refused by the clock, and each new mirror was held at its
+  newest sample until the new ticks overtook the old session's. The clock is now reset with the
+  mirrors. Untimed `SetState` consumers (the shipping client) are unaffected. Test:
+  `RemoteInterpolationTests.ANewGenerationWithLowerTicks_ResetsTheRenderClock_AndItsEntitiesInterpolate`.
+- **Exactly one local entity is predicted per frame.** The system advanced the predictor and wrote
+  its position inside the per-entity loop, so two local mirrors coexisting for a frame would have
+  stepped the single predictor's clock twice and put both avatars at its position. It now drives one
+  (the one already holding `PredictedTransform`, else the first) and releases the claim on any other,
+  which the adapter then keeps writing. Test:
+  `LocalPredictionSystemTests.TwoLocalMirrors_AdvanceThePredictorOnceAFrame_AndOnlyOneIsClaimed`.
+- **A reconnect no longer replays the previous session's inputs from the new spawn.** On a new
+  `DotsEntityView.Generation` or a `WorldState.Tick` that went backwards, `LocalPredictionSystem`
+  reset its own bookkeeping and the clock steering but not the predictor. A host that did not reset
+  the predictor itself kept the old session's pending inputs, history, base tick and position: the
+  new session's first reconcile acknowledged none of those inputs (their ticks were above the new
+  ack line) and replayed them from the new spawn, and every new input was rejected as not newer
+  than the old session's last tick. The system now calls `LocalMovePredictor.Reset()` at the same
+  boundary, before the new session's first reconcile. A host that also resets the predictor on
+  reconnect (the shipping client does) is unaffected: the reset is idempotent and the first
+  new-session input is kept. For a host that did not reset, the new session's first snapshot now
+  seeds the predictor at the new spawn (not counted in `Reconciles`) instead of reconciling the old
+  session's state; `PredictionOwnershipTests.ReconnectReset_ReenablesReconciliation_WhenTheNewServersTicksAreLower`
+  now asserts that seed and a reconcile on the next lower-tick snapshot. Test (3 cases: new generation, backwards world tick only, host resets
+  too):
+  `LocalPredictionSystemTests.AReconnectToLowerTicks_DropsThePriorSessionsInputs_AndStartsAtTheNewSpawn`.
+
+### Migration
+
+- Before: a hand-built entity (not spawned through `DotsEntityView`) was selected for prediction by
+  `NetworkEntity.IsLocal` alone. After: add `LocalNetworkEntity` to any such entity that should be
+  predicted; `NetworkEntity.IsLocal` alone no longer selects it.
+
+## [Unreleased]
+
 ## [0.31.0] - 2026-10-09
 
 Ships with `com.cuvara.netcode` v0.47.0 (prediction fix + KCP/UDP-only gameplay) and

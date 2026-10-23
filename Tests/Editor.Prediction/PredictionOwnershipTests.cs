@@ -153,7 +153,16 @@ namespace Cuvara.DOTS.Tests.Prediction
             Tick();
 
             Assert.AreEqual(1, LocalCount(), "one mirror: the old session's is gone");
-            Assert.AreEqual(1, predictor.Reconciles, "the new session's first ack reconciled");
+            // The predictor is reset at the boundary too, so the new session's first snapshot seeds
+            // it at the new spawn (a seed is not counted) instead of reconciling old-session state.
+            Assert.AreEqual(0, predictor.Reconciles, "the new session's first snapshot seeds the reset predictor");
+            Assert.AreEqual(20f, predictor.SimulatedPosition.X, 1e-4f, "seeded at the new spawn");
+            Assert.AreEqual(20f, predictor.SimulatedPosition.Y, 1e-4f, "seeded at the new spawn");
+
+            // Still below the old session's 100: reconciled only if the boundary reset the memory.
+            ApplyServerSnapshot(21f, 20f, tick: 6);
+            Tick();
+            Assert.AreEqual(1, predictor.Reconciles, "the new session's next ack reconciled");
             var anchor = _entityManager.GetComponentData<ReconciliationAnchor>(Local());
             Assert.AreEqual(new float2(20f, 20f), anchor.ServerPosition);
             Assert.AreEqual(1u, anchor.Sequence, "a fresh anchor for a fresh mirror");

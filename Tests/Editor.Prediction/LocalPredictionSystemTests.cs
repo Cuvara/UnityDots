@@ -419,5 +419,144 @@ namespace Cuvara.DOTS.Tests.Prediction
             using var query = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<PredictedTransform>());
             Assert.AreEqual(0, query.CalculateEntityCount());
         }
+
+        private Entity Find(string id)
+        {
+            using var query = _entityManager.CreateEntityQuery(ComponentType.ReadOnly<NetworkEntity>());
+            using var entities = query.ToEntityArray(Allocator.Temp);
+            var wanted = new FixedString64Bytes(id);
+            for (var i = 0; i < entities.Length; i++)
+            {
+                if (_entityManager.GetComponentData<NetworkEntity>(entities[i]).Id.Equals(wanted)) return entities[i];
+            }
+
+            return Entity.Null;
+        }
+
+        [Test]
+        public void OnlyTheLocalMirror_IsTaggedAtSpawn_AndOnlyItIsPredicted_AmongRemoteMirrors()
+        {
+            // The driver queries the LocalNetworkEntity tag instead of reading NetworkEntity on every
+            // mirror each frame to find the one local entity. The behaviour must be the one the scan
+            // had: remotes spawned before and after the local one are never claimed.
+            var predictor = Predictor();
+            DotsPredictionBootstrap.Install(_world, predictor, _worldState);
+
+            var view = (IEntityView)_view;
+            view.Spawn("uuid-r1", isLocal: false, type: PlayerType);
+            view.Spawn("uuid-r2", isLocal: false, type: PlayerType);
+            SpawnLocal();
+            view.Spawn("uuid-r3", isLocal: false, type: PlayerType);
+            Tick(0.016f);
+
+            var local = Local();
+            Assert.AreNotEqual(Entity.Null, local, "guard: the local mirror exists");
+            Assert.IsTrue(_entityManager.HasComponent<LocalNetworkEntity>(local), "tagged at spawn");
+            Assert.IsTrue(_entityManager.HasComponent<PredictedTransform>(local), "and predicted");
+
+            foreach (var id in new[] { "uuid-r1", "uuid-r2", "uuid-r3" })
+            {
+                var remote = Find(id);
+                Assert.AreNotEqual(Entity.Null, remote, $"guard: {id} exists");
+                Assert.IsFalse(_entityManager.HasComponent<LocalNetworkEntity>(remote), $"{id} is not tagged");
+                Assert.IsFalse(_entityManager.HasComponent<PredictedTransform>(remote), $"{id} is not claimed");
+            }
+        }
+
+        [Test]
+        public void TwoLocalMirrors_AdvanceThePredictorOnceAFrame_AndOnlyOneIsClaimed()
+        {
+            // No current path produces two local mirrors, but one predictor driven for two entities
+            // would step its clock twice a frame and stamp its position on both avatars. Exactly one
+            // is driven; the other is handed back to the adapter instead of being frozen.
+            var predictor = Predictor();
+            DotsPredictionBootstrap.Install(_world, predictor, _worldState);
+
+            var view = (IEntityView)_view;
+            view.Spawn("uuid-me", isLocal: true, type: PlayerType);
+            view.Spawn("uuid-me-2", isLocal: true, type: PlayerType);
+            Tick(0f);
+
+            // The same frames on a predictor nobody else drives: what "once a frame" adds up to.
+            var reference = Predictor();
+            for (var frame = 0; frame < 5; frame++)
+            {
+                Tick(0.1f);
+                reference.Advance(0.1f);
+            }
+
+            Assert.Greater(reference.BaseTicksAdvanced, 0, "guard: these frames step base ticks at all");
+            Assert.AreEqual(reference.BaseTicksAdvanced, predictor.BaseTicksAdvanced,
+                "the predictor advanced once per frame, not once per local mirror");
+
+            var first = Find("uuid-me");
+            var second = Find("uuid-me-2");
+            Assert.IsTrue(_entityManager.HasComponent<LocalNetworkEntity>(first), "guard: both are local mirrors");
+            Assert.IsTrue(_entityManager.HasComponent<LocalNetworkEntity>(second), "guard: both are local mirrors");
+
+            var firstClaimed = _entityManager.HasComponent<PredictedTransform>(first);
+            var secondClaimed = _entityManager.HasComponent<PredictedTransform>(second);
+            Assert.AreNotEqual(firstClaimed, secondClaimed, "exactly one local mirror is predicted");
+
+            // The unclaimed one is the adapter's again: its next state lands on its transform.
+            var unclaimed = firstClaimed ? "uuid-me-2" : "uuid-me";
+            view.SetState(unclaimed, 4f, 5f, 100, 100);
+            Tick(0.1f);
+            Assert.AreEqual(new float3(4f, 0f, 5f),
+                _entityManager.GetComponentData<LocalTransform>(Find(unclaimed)).Position);
+
+            // And the choice holds from frame to frame rather than flipping with chunk order.
+            Assert.AreEqual(firstClaimed, _entityManager.HasComponent<PredictedTransform>(first));
+            Assert.AreEqual(secondClaimed, _entityManager.HasComponent<PredictedTransform>(second));
+        }
+
+        [TestCase(true, false)]
+        [TestCase(false, false)]
+        [TestCase(true, true)]
+        public void AReconnectToLowerTicks_DropsThePriorSessionsInputs_AndStartsAtTheNewSpawn(
+            bool newGeneration, bool consumerResetsPredictor)
+        {
+            // The session boundary is a predictor boundary. Inputs recorded in the old session are
+            // above the new session's ack line, so a predictor carried across would never see them
+            // acknowledged: the new session's first reconcile would replay them from the new spawn
+            // and every new input would be rejected as not newer than the old session's last tick.
+            // The third case is a consumer that resets the predictor on reconnect itself (the
+            // shipping client does): the driver's reset on top of it must change nothing.
+            var predictor = Predictor();
+            DotsPredictionBootstrap.Install(_world, predictor, _worldState);
+
+            // Old session: seeded at tick 100, then ten unacknowledged moves.
+            SpawnLocal(100f, 100f);
+            ApplyServerSnapshot("uuid-me", 100f, 100f, speed: 5f, tick: 100);
+            Tick(0.016f);
+            for (long tick = 101; tick <= 110; tick++) predictor.RecordInput(tick, 1f, 0f);
+            for (var frame = 0; frame < 5; frame++) Tick(0.016f);
+            Assert.AreEqual(10, predictor.PendingCount, "guard: the old session has pending inputs");
+
+            // Reconnect: the new server's ticks start below the old ones, and the player spawns
+            // somewhere else. The gap is kept inside the predictor's hard-resync window (two
+            // seconds of ticks): a larger one would make the clock steering drop the pending
+            // inputs on its own and hide the replay this guards against.
+            if (consumerResetsPredictor) predictor.Reset();
+            if (newGeneration) _view.BeginGeneration();
+            _worldState.Reset();
+            SpawnLocal(300f, 500f);
+            ApplyServerSnapshot("uuid-me", 300f, 500f, speed: 5f, tick: 90);
+            Tick(0.016f);
+
+            Assert.AreEqual(0, predictor.PendingCount, "no input from the previous session survives the reconnect");
+            Assert.AreEqual(300f, predictor.Position.X, 1e-4f, "the predictor starts at the new spawn");
+            Assert.AreEqual(500f, predictor.Position.Y, 1e-4f, "the predictor starts at the new spawn");
+            var local = Local();
+            Assert.IsTrue(_entityManager.HasComponent<PredictedTransform>(local), "guard: the new mirror is predicted");
+            Assert.AreEqual(SnapshotSpaceMapping.XZPlane.ToWorld(300f, 500f),
+                _entityManager.GetComponentData<LocalTransform>(local).Position,
+                "the local entity is drawn at the new spawn");
+
+            // The new session's first input is kept, not rejected against the old tick line.
+            predictor.RecordInput(91, 1f, 0f);
+            Assert.AreEqual(0, predictor.RejectedInputs, "the first new-session input is not rejected");
+            Assert.AreEqual(1, predictor.PendingCount, "the first new-session input is pending");
+        }
     }
 }
