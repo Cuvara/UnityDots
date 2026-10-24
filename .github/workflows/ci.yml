@@ -419,7 +419,7 @@ jobs:
             'Cuvara.DOTS.Tests.Runtime>=29' \
             'Cuvara.DOTS.Tests.GameLogic>=41' \
             'Cuvara.DOTS.Tests.Netcode>=120' \
-            'Cuvara.DOTS.Tests.Prediction>=35' \
+            'Cuvara.DOTS.Tests.Prediction>=37' \
             'Cuvara.DOTS.Tests.Physics==0'
 
       - uses: actions/upload-artifact@v4
@@ -762,7 +762,7 @@ jobs:
             'Cuvara.DOTS.Tests.Runtime>=29' \
             'Cuvara.DOTS.Tests.GameLogic>=41' \
             'Cuvara.DOTS.Tests.Netcode>=120' \
-            'Cuvara.DOTS.Tests.Prediction>=35' \
+            'Cuvara.DOTS.Tests.Prediction>=37' \
             'Cuvara.DOTS.Tests.DI>=5' \
             'Cuvara.DOTS.Tests.Physics==0'
 
