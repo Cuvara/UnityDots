@@ -26,7 +26,7 @@ sample-only / data-contract-only / planned, and records what CI actually tests.
 | `Runtime.Physics/` | `Cuvara.DOTS.Physics` | `CUVARA_DOTS_PHYSICS` — `com.unity.physics` ≥ 1.0.0; not auto-referenced | Body factory, spatial queries, `MoveData` → `PhysicsVelocity` bridge. **No collision/trigger collector.** | untested, not in CI |
 | `Editor/` | `Cuvara.DOTS.Editor` | Editor | DOTS View Debug window | untested |
 | `Tests/Editor/`, `Tests/Runtime/` | `Cuvara.DOTS.Tests.Editor`, `.Runtime` | tests | Core EditMode / PlayMode tests | CI floors 30 / 29 |
-| `Tests/Editor.Netcode/`, `Tests/Editor.Prediction/`, `Tests/Editor.GameLogic/` | `Cuvara.DOTS.Tests.*` | as their runtime assembly | Adapter, prediction, shared-logic parity | CI floors 47 / 19 / 41 |
+| `Tests/Editor.Netcode/`, `Tests/Editor.Prediction/`, `Tests/Editor.GameLogic/` | `Cuvara.DOTS.Tests.*` | as their runtime assembly | Adapter, prediction, shared-logic parity | CI floors 120 / 37 / 41 |
 | `Samples~/` | `Cuvara.DOTS.Samples.*` | per sample | Hybrid Views (scene), Networked Prediction (live backend), Stress Benchmark | sample-only |
 
 Optional assemblies are gated by asmdef `versionDefines` + `defineConstraints`: with the dependency
@@ -254,7 +254,7 @@ each asserting a **test-count floor per assembly** (a green run over zero tests 
 |---|---|---|
 | no optional packages | — | all three must be absent |
 | netcode absent | `sgl-v0.7.0` | GameLogic ≥ 41; Netcode/Prediction absent |
-| netcode present | `com.cuvara.netcode#v0.49.0`, `sgl-v0.7.0`, OpenUPM scope | Netcode ≥ 47, Prediction ≥ 19, GameLogic ≥ 41 |
+| netcode present | `com.cuvara.netcode#v0.49.0`, `sgl-v0.7.0`, OpenUPM scope | Netcode ≥ 120, Prediction ≥ 37, GameLogic ≥ 41 |
 
 Not covered by any row: `Cuvara.DOTS.DI`, `Cuvara.DOTS.GameFoundation`, `Cuvara.DOTS.Physics`,
 `Cuvara.DOTS.Editor`, Android/IL2CPP, WebGL. There are **no measured performance figures** in this
