@@ -313,17 +313,65 @@ namespace Cuvara.DOTS.Tests.Prediction
         [Test]
         public void AServerThatSendsNoSpeed_LeavesTheFallbackStanding()
         {
-            // Zero on the wire means "not sent", not "speed is zero". Collapsing to zero would
-            // freeze prediction while leaving every counter looking healthy.
+            // Absent speed is NaN since netcode 0.49.0 (a present 0 is immobile, see below).
+            // Adopting NaN would poison every replay with no error on either side.
             var predictor = Predictor();
             DotsPredictionBootstrap.Install(_world, predictor, _worldState);
 
             SpawnLocal();
-            ApplyServerSnapshot("uuid-me", 0f, 0f, speed: 0f, tick: 1);
+            ApplyServerSnapshot("uuid-me", 0f, 0f, speed: float.NaN, tick: 1);
             Tick(0.016f);
 
             Assert.AreEqual(5f, predictor.EffectiveSpeed, 1e-4f,
-                "a non-positive wire speed must leave the constructed fallback in place");
+                "an absent (NaN) wire speed must leave the constructed fallback in place");
+        }
+
+        [Test]
+        public void AnAbsentSpeed_AfterAPresentOne_KeepsTheLastValue()
+        {
+            var predictor = Predictor();
+            DotsPredictionBootstrap.Install(_world, predictor, _worldState);
+
+            SpawnLocal();
+            ApplyServerSnapshot("uuid-me", 0f, 0f, speed: 7.5f, tick: 1);
+            Tick(0.016f);
+            ApplyServerSnapshot("uuid-me", 0f, 0f, speed: float.NaN, tick: 2);
+            Tick(0.016f);
+
+            Assert.AreEqual(7.5f, predictor.EffectiveSpeed, 1e-4f,
+                "a snapshot without a speed must not reset or zero the last server speed");
+        }
+
+        [Test]
+        public void APresentZeroSpeed_IsAdopted_RootedPredictionDoesNotMove_AndRecoversAfterUnroot()
+        {
+            // Present 0 = immobile (rooted). Before netcode 0.49.0 it was indistinguishable from
+            // absent and the predictor kept walking at the fallback speed while the server held
+            // the player still.
+            var predictor = Predictor();
+            DotsPredictionBootstrap.Install(_world, predictor, _worldState);
+            SpawnLocal();
+
+            ApplyServerSnapshot("uuid-me", 0f, 0f, speed: 0f, tick: 1);
+            Tick(0.016f);
+            Assert.AreEqual(0f, predictor.EffectiveSpeed, 1e-6f, "a present 0 must be adopted");
+
+            var entity = Local();
+            predictor.RecordInput(2, 1f, 0f);
+            var start = _entityManager.GetComponentData<LocalTransform>(entity).Position;
+            for (var frame = 0; frame < 30; frame++) Tick(0.016f);
+            var rooted = _entityManager.GetComponentData<LocalTransform>(entity).Position;
+            Assert.AreEqual(start.x, rooted.x, 1e-5f, "a rooted player must not move under held input");
+            Assert.AreEqual(start.z, rooted.z, 1e-5f);
+
+            ApplyServerSnapshot("uuid-me", 0f, 0f, speed: 5f, tick: 3);
+            Tick(0.016f);
+            Assert.AreEqual(5f, predictor.EffectiveSpeed, 1e-4f, "un-root must restore movement speed");
+            predictor.RecordInput(4, 1f, 0f);
+            for (var frame = 0; frame < 30; frame++) Tick(0.016f);
+            var recovered = _entityManager.GetComponentData<LocalTransform>(entity).Position;
+            Assert.Greater(math.distance(rooted, recovered), 0.01f,
+                "after the un-root the predicted position must move again");
         }
 
         [Test]

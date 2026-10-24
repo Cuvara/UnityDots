@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-10-24
+
+Ships with `com.cuvara.netcode` v0.49.0 and `sgl-v0.7.0` (unchanged). Minor: the prediction driver
+now treats a present speed of 0 as immobile instead of ignoring it.
+
+Compatibility: Unity 6000.3.9f1; netcode v0.49.0 (CI pin moved from v0.48.0); sgl-v0.7.0 (unchanged).
+Evidence: GitHub Actions CI for the release commit (UnityDots PR #38), rows core-only,
+netcode-absent, netcode-present, physics, full-stack, gamefoundation. Netcode 0.49.0 API changes
+checked against this package: `SubscriberInvoker` is internal and unused here; `KcpCrypto.Seal` now
+returns `bool` and is not called here; nothing else public that this package uses changed.
+
+### Changed
+
+- **Effective speed: absent is `NaN`, a present `0` is immobile** (netcode 0.49.0). `LocalPredictionSystem`
+  still calls `SetServerSpeed(snapshot.Speed)`; with netcode 0.49.0 the predictor ignores `NaN` (the
+  last value stands) and adopts `0`, so a rooted player's prediction no longer walks at the fallback
+  speed. Comments and class remarks updated. Tests:
+  `LocalPredictionSystemTests.APresentZeroSpeed_IsAdopted_RootedPredictionDoesNotMove_AndRecoversAfterUnroot`,
+  `AServerThatSendsNoSpeed_LeavesTheFallbackStanding`, `AnAbsentSpeed_AfterAPresentOne_KeepsTheLastValue`.
+- **CI pin moved: `com.cuvara.netcode` v0.48.0 -> v0.49.0** (netcode-present and full-stack rows),
+  with README and `SUPPORT-MATRIX.md`. Prediction test floor raised 35 -> 37.
+
+### Migration
+
+- Deploy a server that sends speed presence (rpg-mmo-server #488) before moving a client to
+  netcode 0.49.0: an older server that writes JSON `"speed": 0` for "no value" now reads as immobile.
+- Test code that builds a `ResolvedEntity` without a speed gets `NaN` (was 0). Assert
+  `float.IsNaN(entity.Speed)`, not `== 0f`. Pass `speed: 0f` explicitly for a rooted entity.
+- The `versionDefines` floor for `Cuvara.DOTS.Netcode.Prediction` stays 0.47.0 (it still compiles);
+  the rooted-player behaviour needs netcode >= 0.49.0.
+
 ## [0.32.0] - 2026-10-23
 
 Ships with `com.cuvara.netcode` v0.48.0 and `sgl-v0.7.0` (unchanged). Minor, not patch: adds the

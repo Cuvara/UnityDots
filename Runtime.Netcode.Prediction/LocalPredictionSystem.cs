@@ -45,7 +45,9 @@ namespace Cuvara.DOTS.Netcode.Prediction
     /// construction, and a client integrating at a different rate from the server desyncs every
     /// tick with no error on either side — the failure looks exactly like a badly tuned predictor.
     /// The wire has carried per-entity speed since netcode 0.8.0, so this system reads it from
-    /// <c>WorldState</c> and calls <c>SetServerSpeed</c> before each reconcile.
+    /// <c>WorldState</c> and calls <c>SetServerSpeed</c> before each reconcile. Since netcode
+    /// 0.49.0 an absent speed is <c>NaN</c> (ignored, the last value stands) and a present
+    /// <c>0</c> means immobile: a rooted player's prediction does not move.
     /// </para>
     /// <para>
     /// <b>Input is not sampled here.</b> <c>RecordInput</c> belongs to whatever reads the device and
@@ -203,8 +205,9 @@ namespace Cuvara.DOTS.Netcode.Prediction
 
                     // Speed first, then the clock, then position — the order WorldViewBinder
                     // uses. Reconcile replays unacknowledged inputs, so replaying at a stale
-                    // speed integrates the whole backlog at the wrong rate. Non-positive is
-                    // ignored inside SetServerSpeed: on the wire that means "not sent".
+                    // speed integrates the whole backlog at the wrong rate. NaN means the
+                    // server did not send a speed and SetServerSpeed ignores it (the last value
+                    // stands); a present 0 means immobile (rooted) and is adopted.
                     predictor.SetServerSpeed(snapshot.Speed);
 
                     // Seeds the predictor's base tick once (idempotent), measures the snapshot
