@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### CI
+
+- Updated the netcode-present and full-stack CI pins to `com.cuvara.netcode` v0.50.0; `sgl-v0.7.0` remains unchanged.
+
 ## [0.33.0] - 2026-10-24
 
 Ships with `com.cuvara.netcode` v0.49.0 and `sgl-v0.7.0` (unchanged). Minor: the prediction driver
